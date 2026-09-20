@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 #
-# secure-mc uninstaller. Removes the wrapper and, optionally, restores the
+# sealedmc uninstaller. Removes the wrapper and, optionally, restores the
 # real mc binary to a directory on PATH. Encrypted credentials are kept
 # unless --purge is given.
 
 set -euo pipefail
 
-INSTALL_DIR="${SECURE_MC_INSTALL_DIR:-$HOME/.local/bin}"
-CONFIG_DIR="${SECURE_MC_CONFIG_DIR:-$HOME/.config/secure-mc}"
+INSTALL_DIR="${SEALEDMC_INSTALL_DIR:-$HOME/.local/bin}"
+CONFIG_DIR="${SEALEDMC_CONFIG_DIR:-$HOME/.config/sealedmc}"
 TARGET="$INSTALL_DIR/mc"
 PURGE=0
 
 [[ "${1:-}" == "--purge" ]] && PURGE=1
 
-if [[ -f "$TARGET" ]] && grep -q '^# secure-mc:' "$TARGET" 2>/dev/null; then
+if [[ -f "$TARGET" ]] && grep -q '^# sealedmc:' "$TARGET" 2>/dev/null; then
   rm -f "$TARGET"
   printf 'Removed %s\n' "$TARGET"
 else
-  printf 'No secure-mc wrapper found at %s\n' "$TARGET"
+  printf 'No sealedmc wrapper found at %s\n' "$TARGET"
 fi
 
 if [[ -r "$CONFIG_DIR/mc-path" ]]; then

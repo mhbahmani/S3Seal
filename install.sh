@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 #
-# secure-mc installer
+# sealedmc installer
 #
-#   curl -fsSL https://raw.githubusercontent.com/YOUR-GITHUB-USER/secure-mc/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/YOUR-GITHUB-USER/sealedmc/main/install.sh | bash
 #
-# Installs the secure-mc wrapper as ~/.local/bin/mc. The wrapper takes over
+# Installs the sealedmc wrapper as ~/.local/bin/mc. The wrapper takes over
 # the "mc" name, so the real MinIO client must not be on PATH.
 
 set -euo pipefail
 
-REPO="${SECURE_MC_REPO:-YOUR-GITHUB-USER/secure-mc}"
-REF="${SECURE_MC_REF:-main}"
+REPO="${SEALEDMC_REPO:-YOUR-GITHUB-USER/sealedmc}"
+REF="${SEALEDMC_REF:-main}"
 RAW_URL="https://raw.githubusercontent.com/$REPO/$REF/mc"
 
-INSTALL_DIR="${SECURE_MC_INSTALL_DIR:-$HOME/.local/bin}"
-LIBEXEC_DIR="${SECURE_MC_LIBEXEC_DIR:-$HOME/.local/libexec}"
-CONFIG_DIR="${SECURE_MC_CONFIG_DIR:-$HOME/.config/secure-mc}"
+INSTALL_DIR="${SEALEDMC_INSTALL_DIR:-$HOME/.local/bin}"
+LIBEXEC_DIR="${SEALEDMC_LIBEXEC_DIR:-$HOME/.local/libexec}"
+CONFIG_DIR="${SEALEDMC_CONFIG_DIR:-$HOME/.config/sealedmc}"
 TARGET="$INSTALL_DIR/mc"
 
 if [[ -t 1 ]]; then
@@ -31,9 +31,9 @@ fail()  { printf '%s✗%s %s\n' "$E" "$R" "$*" >&2; }
 
 cat <<BANNER
 
-${B}secure-mc installer${R}
+${B}sealedmc installer${R}
 
-secure-mc is a wrapper around the MinIO client. It stores each alias's
+sealedmc is a wrapper around the MinIO client. It stores each alias's
 credentials in a separate GPG-encrypted file and decrypts them into the
 environment of a single mc process, so nothing is ever kept in plaintext
 in ~/.mc/config.json.
@@ -61,9 +61,9 @@ if (( ${#missing[@]} )); then
   exit 1
 fi
 
-# --- is an existing secure-mc install already in place? --------------------
+# --- is an existing sealedmc install already in place? --------------------
 UPGRADE=0
-if [[ -f "$TARGET" ]] && grep -q '^# secure-mc:' "$TARGET" 2>/dev/null; then
+if [[ -f "$TARGET" ]] && grep -q '^# sealedmc:' "$TARGET" 2>/dev/null; then
   UPGRADE=1
 fi
 
@@ -72,7 +72,7 @@ found_mc=""
 while IFS= read -r candidate; do
   [[ -n "$candidate" ]] || continue
   # Our own wrapper (or a previous install of it) does not count.
-  grep -q '^# secure-mc:' "$candidate" 2>/dev/null && continue
+  grep -q '^# sealedmc:' "$candidate" 2>/dev/null && continue
   found_mc="$candidate"
   break
 done < <(type -a -p mc 2>/dev/null || true)
@@ -95,7 +95,7 @@ if [[ -n "$found_mc" ]]; then
   fi
   info ""
   info "Alternatively, remove $(dirname "$found_mc") from your PATH, or set"
-  info "SECURE_MC_LIBEXEC_DIR to wherever you prefer to keep the real binary."
+  info "SEALEDMC_LIBEXEC_DIR to wherever you prefer to keep the real binary."
   info ""
   info "Then re-run this installer."
   exit 1
@@ -110,7 +110,7 @@ for candidate in \
   "/opt/minio/mc"
 do
   [[ -n "$candidate" && -x "$candidate" ]] || continue
-  grep -q '^# secure-mc:' "$candidate" 2>/dev/null && continue
+  grep -q '^# sealedmc:' "$candidate" 2>/dev/null && continue
   real_mc="$candidate"
   break
 done
@@ -118,7 +118,7 @@ done
 if [[ -z "$real_mc" ]]; then
   fail "could not find the real mc binary."
   info ""
-  info "secure-mc does not bundle the MinIO client; it wraps yours."
+  info "sealedmc does not bundle the MinIO client; it wraps yours."
   info "Put the real binary at $LIBEXEC_DIR/mc, or set MC_BIN, then re-run."
   info ""
   info "To download it fresh:"
@@ -150,7 +150,7 @@ else
 fi
 
 head -n1 "$tmp" | grep -q '^#!' || { fail "downloaded file does not look like a script"; exit 1; }
-grep -q '^# secure-mc:' "$tmp" || { fail "downloaded file is not the secure-mc wrapper"; exit 1; }
+grep -q '^# sealedmc:' "$tmp" || { fail "downloaded file is not the sealedmc wrapper"; exit 1; }
 bash -n "$tmp" || { fail "the wrapper failed a syntax check; refusing to install"; exit 1; }
 
 mkdir -p "$INSTALL_DIR"
@@ -175,7 +175,7 @@ esac
 
 # --- GPG recipient check ---------------------------------------------------
 recipient_ok=0
-[[ -s "$CONFIG_DIR/recipient" || -n "${SECURE_MC_GPG_RECIPIENT:-}" ]] && recipient_ok=1
+[[ -s "$CONFIG_DIR/recipient" || -n "${SEALEDMC_GPG_RECIPIENT:-}" ]] && recipient_ok=1
 
 # --- summary ---------------------------------------------------------------
 printf '\n%sInstallation complete.%s\n\n' "$B" "$R"
@@ -202,7 +202,7 @@ fi
 if (( ! recipient_ok )); then
   warn "no GPG recipient configured yet."
   info ""
-  info "  secure-mc encrypts each alias to one of your own GPG keys."
+  info "  sealedmc encrypts each alias to one of your own GPG keys."
   info "  Set it once:"
   info ""
   info "      echo 'you@example.com' > $CONFIG_DIR/recipient"
@@ -215,7 +215,7 @@ info "Next steps:"
 info ""
 info "  1. Check the wrapper is the one being found:"
 info "         command -v mc          # should print $TARGET"
-info "         mc --secure-mc-version"
+info "         mc --sealedmc-version"
 info ""
 info "  2. Store an alias (you will be prompted for the keys):"
 info "         mc alias set prod https://minio.example.com"

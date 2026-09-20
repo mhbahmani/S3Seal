@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# secure-mc: a drop-in wrapper around the MinIO client (mc) that keeps
+# sealedmc: a drop-in wrapper around the MinIO client (mc) that keeps
 # credentials in per-alias GPG-encrypted files instead of plaintext in
 # ~/.mc/config.json.
 #
@@ -8,19 +8,19 @@
 # process. They are never written to disk unencrypted, never passed in
 # argv, and never stored in shell history.
 #
-# https://github.com/YOUR-GITHUB-USER/secure-mc
+# https://github.com/YOUR-GITHUB-USER/sealedmc
 
 set -euo pipefail
 
 VERSION="1.0.0"
 
-CONFIG_DIR="${SECURE_MC_CONFIG_DIR:-$HOME/.config/secure-mc}"
+CONFIG_DIR="${SEALEDMC_CONFIG_DIR:-$HOME/.config/sealedmc}"
 STORE="$CONFIG_DIR/aliases"
 RECIPIENT_FILE="$CONFIG_DIR/recipient"
 MC_PATH_FILE="$CONFIG_DIR/mc-path"
 
-die() { printf 'secure-mc: %s\n' "$*" >&2; exit 1; }
-warn() { printf 'secure-mc: %s\n' "$*" >&2; }
+die() { printf 'sealedmc: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'sealedmc: %s\n' "$*" >&2; }
 
 # ---------------------------------------------------------------------------
 # Locate the real mc binary.
@@ -68,14 +68,14 @@ find_mc_binary() {
   return 1
 }
 
-if [[ -n "${SECURE_MC_ACTIVE:-}" ]]; then
+if [[ -n "${SEALEDMC_ACTIVE:-}" ]]; then
   die "recursion detected: the resolved mc binary is this wrapper. Set MC_BIN to the real mc."
 fi
 
 MC_REAL="$(find_mc_binary)" || die "cannot find the real mc binary.
 Set MC_BIN, or write its absolute path to $MC_PATH_FILE"
 
-export SECURE_MC_ACTIVE=1
+export SEALEDMC_ACTIVE=1
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -88,13 +88,13 @@ valid_alias() { [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; }
 store_path() { printf '%s/%s.url.asc' "$STORE" "$1"; }
 
 recipient() {
-  if [[ -n "${SECURE_MC_GPG_RECIPIENT:-}" ]]; then
-    printf '%s' "$SECURE_MC_GPG_RECIPIENT"
+  if [[ -n "${SEALEDMC_GPG_RECIPIENT:-}" ]]; then
+    printf '%s' "$SEALEDMC_GPG_RECIPIENT"
   elif [[ -r "$RECIPIENT_FILE" ]]; then
     tr -d '[:space:]' < "$RECIPIENT_FILE"
   else
     die "no GPG recipient configured.
-Set SECURE_MC_GPG_RECIPIENT, or write a key id / email to $RECIPIENT_FILE"
+Set SEALEDMC_GPG_RECIPIENT, or write a key id / email to $RECIPIENT_FILE"
   fi
 }
 
@@ -155,8 +155,8 @@ Names must match [A-Za-z_][A-Za-z0-9_]* because mc reads them as MC_HOST_$name."
   host="${host%%/*}"
   full="$scheme://$(urlencode "$ak"):$(urlencode "$sk")@$host"
 
-  if [[ -z "${SECURE_MC_NO_VERIFY:-}" ]]; then
-    if MC_HOST_securemcprobe="$full" "$MC_REAL" ls securemcprobe/ >/dev/null 2>&1; then
+  if [[ -z "${SEALEDMC_NO_VERIFY:-}" ]]; then
+    if MC_HOST_sealedmcprobe="$full" "$MC_REAL" ls sealedmcprobe/ >/dev/null 2>&1; then
       printf 'Verified connection to %s://%s\n' "$scheme" "$host"
     else
       warn "warning: could not list buckets with these credentials (storing anyway)"
@@ -190,7 +190,7 @@ cmd_alias_list() {
   for f in "$STORE"/*.url.asc; do
     found=1
     n="${f##*/}"; n="${n%.url.asc}"
-    if [[ -n "${SECURE_MC_LIST_ENDPOINTS:-}" ]]; then
+    if [[ -n "${SEALEDMC_LIST_ENDPOINTS:-}" ]]; then
       url="$(decrypt_alias "$n")"
       host="${url#*@}"
       printf '%-20s %s://%s\n' "$n" "${url%%://*}" "$host"
@@ -220,13 +220,13 @@ if [[ "${1:-}" == "alias" ]]; then
     list|ls)
       cmd_alias_list ;;
     *)
-      die "unsupported: 'mc alias ${sub:-}'. secure-mc handles set, remove and list." ;;
+      die "unsupported: 'mc alias ${sub:-}'. sealedmc handles set, remove and list." ;;
   esac
   exit 0
 fi
 
-if [[ "${1:-}" == "--secure-mc-version" ]]; then
-  printf 'secure-mc %s (wrapping %s)\n' "$VERSION" "$MC_REAL"
+if [[ "${1:-}" == "--sealedmc-version" ]]; then
+  printf 'sealedmc %s (wrapping %s)\n' "$VERSION" "$MC_REAL"
   exit 0
 fi
 

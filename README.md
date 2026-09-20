@@ -1,6 +1,6 @@
-# secure-mc
+# Sealed MinIO Client
 
-A drop-in wrapper around the [MinIO client](https://min.io/docs/minio/linux/reference/minio-mc.html)
+`sealedmc` is a drop-in wrapper around the [MinIO client](https://min.io/docs/minio/linux/reference/minio-mc.html)
 (`mc`) that keeps credentials in per-alias GPG-encrypted files instead of
 plaintext in `~/.mc/config.json`.
 
@@ -9,7 +9,7 @@ By default, `mc alias set` writes your access key and secret key to
 a backup, a synced folder, a misbehaving dependency, a stolen laptop with an
 unencrypted disk — gets your object storage credentials.
 
-`secure-mc` encrypts each alias to one of your GPG keys and decrypts it into
+`sealedmc` encrypts each alias to one of your GPG keys and decrypts it into
 the environment of a single `mc` process, only when a command actually
 references that alias.
 
@@ -28,7 +28,7 @@ takes precedence over the config file:
 MC_HOST_prod='https://ACCESSKEY:SECRETKEY@minio.example.com'
 ```
 
-`secure-mc` installs itself as `mc` on your `PATH`. On every invocation it
+`sealedmc` installs itself as `mc` on your `PATH`. On every invocation it
 scans the arguments, decrypts only the aliases that command mentions, exports
 them as `MC_HOST_*`, and then `exec`s the real `mc` binary.
 
@@ -41,12 +41,12 @@ mc cp prod/bucket/x dev/bucket/     ->  decrypts "prod" and "dev", exports both,
 
 - `bash` 4+ (or macOS `bash` 3.2)
 - `gpg` with a key pair of your own (`gpg --full-generate-key`)
-- the real MinIO client binary — `secure-mc` wraps yours, it does not bundle one
+- the real MinIO client binary — `sealedmc` wraps yours, it does not bundle one
 
 ## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR-GITHUB-USER/secure-mc/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/YOUR-GITHUB-USER/sealedmc/main/install.sh | bash
 ```
 
 The wrapper installs to `~/.local/bin/mc`.
@@ -75,7 +75,7 @@ sudo chown "$(id -un)" ~/.local/libexec/mc
 ```
 
 Then re-run the install command. The installer records the real binary's path
-in `~/.config/secure-mc/mc-path`.
+in `~/.config/sealedmc/mc-path`.
 
 ### PATH
 
@@ -90,19 +90,19 @@ The installer tells you if this step is needed.
 
 ### GPG recipient
 
-Tell `secure-mc` which key to encrypt to, once:
+Tell `sealedmc` which key to encrypt to, once:
 
 ```bash
-echo 'you@example.com' > ~/.config/secure-mc/recipient
+echo 'you@example.com' > ~/.config/sealedmc/recipient
 ```
 
-Or set `SECURE_MC_GPG_RECIPIENT` in your environment.
+Or set `SEALEDMC_GPG_RECIPIENT` in your environment.
 
 ### Verify
 
 ```bash
 command -v mc            # should print ~/.local/bin/mc
-mc --secure-mc-version
+mc --sealedmc-version
 ```
 
 ## Usage
@@ -116,7 +116,7 @@ mc alias set prod https://minio.example.com
 You are prompted for the access key and secret key on the terminal, so neither
 ends up in your shell history. Both are URL-encoded before being stored, so
 keys containing `/`, `+` or `@` work correctly. The alias is verified against
-the server, then encrypted to `~/.config/secure-mc/aliases/prod.url.asc`.
+the server, then encrypted to `~/.config/sealedmc/aliases/prod.url.asc`.
 
 Non-interactive form (avoid it — the keys land in your history):
 
@@ -131,7 +131,7 @@ mc alias list
 mc alias remove prod
 ```
 
-Set `SECURE_MC_LIST_ENDPOINTS=1` to also show each alias's endpoint (this
+Set `SEALEDMC_LIST_ENDPOINTS=1` to also show each alias's endpoint (this
 decrypts every stored alias, so expect a GPG prompt).
 
 ### Everything else
@@ -200,7 +200,7 @@ can be worked around in the wrapper.
 The underlying problem is long-lived static keys. If your MinIO deployment has
 an identity provider (OIDC or LDAP) or supports `AssumeRole`, short-lived STS
 credentials are a better answer: they expire on their own, and nothing durable
-ever touches your disk. `secure-mc` is for the common case where static keys
+ever touches your disk. `sealedmc` is for the common case where static keys
 are what you have.
 
 ## Environment variables
@@ -208,18 +208,18 @@ are what you have.
 | Variable | Purpose |
 | --- | --- |
 | `MC_BIN` | Absolute path to the real `mc` binary (overrides everything else) |
-| `SECURE_MC_CONFIG_DIR` | Config and credential store (default `~/.config/secure-mc`) |
-| `SECURE_MC_GPG_RECIPIENT` | GPG key id or email to encrypt to |
-| `SECURE_MC_NO_VERIFY` | Skip the connection check during `mc alias set` |
-| `SECURE_MC_LIST_ENDPOINTS` | Show endpoints in `mc alias list` |
-| `SECURE_MC_INSTALL_DIR` | Install location (default `~/.local/bin`) |
-| `SECURE_MC_LIBEXEC_DIR` | Where the real binary is expected (default `~/.local/libexec`) |
+| `SEALEDMC_CONFIG_DIR` | Config and credential store (default `~/.config/sealedmc`) |
+| `SEALEDMC_GPG_RECIPIENT` | GPG key id or email to encrypt to |
+| `SEALEDMC_NO_VERIFY` | Skip the connection check during `mc alias set` |
+| `SEALEDMC_LIST_ENDPOINTS` | Show endpoints in `mc alias list` |
+| `SEALEDMC_INSTALL_DIR` | Install location (default `~/.local/bin`) |
+| `SEALEDMC_LIBEXEC_DIR` | Where the real binary is expected (default `~/.local/libexec`) |
 
 ## Uninstall
 
 ```bash
 ./uninstall.sh            # removes the wrapper, keeps encrypted credentials
-./uninstall.sh --purge    # also deletes ~/.config/secure-mc
+./uninstall.sh --purge    # also deletes ~/.config/sealedmc
 ```
 
 ## Files
@@ -227,7 +227,7 @@ are what you have.
 ```
 ~/.local/bin/mc                            the wrapper
 ~/.local/libexec/mc                        the real MinIO client
-~/.config/secure-mc/recipient              GPG key id to encrypt to
-~/.config/secure-mc/mc-path                path to the real binary
-~/.config/secure-mc/aliases/<name>.url.asc one encrypted alias per file (0600)
+~/.config/sealedmc/recipient              GPG key id to encrypt to
+~/.config/sealedmc/mc-path                path to the real binary
+~/.config/sealedmc/aliases/<name>.url.asc one encrypted alias per file (0600)
 ```
