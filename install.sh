@@ -29,6 +29,27 @@ ok()    { printf '%s✓%s %s\n' "$G" "$R" "$*"; }
 warn()  { printf '%s!%s %s\n' "$Y" "$R" "$*"; }
 fail()  { printf '%s✗%s %s\n' "$E" "$R" "$*" >&2; }
 
+# On many Linux distributions "mc" is Midnight Commander, not MinIO's client.
+is_minio_mc() { "$1" --version 2>/dev/null | grep -q 'RELEASE\.'; }
+is_wrapper()  { grep -q '^# sealedmc:' "$1" 2>/dev/null; }
+
+mc_download_url() {
+  local os arch
+  case "$(uname -s)" in
+    Linux) os=linux ;;
+    Darwin) os=darwin ;;
+    *) os="$(uname -s | tr '[:upper:]' '[:lower:]')" ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    ppc64le) arch=ppc64le ;;
+    s390x) arch=s390x ;;
+    *) arch="$(uname -m)" ;;
+  esac
+  printf 'https://dl.min.io/client/mc/release/%s-%s/mc' "$os" "$arch"
+}
+
 cat <<BANNER
 
 ${B}sealedmc installer${R}
@@ -63,7 +84,7 @@ fi
 
 # --- is an existing sealedmc install already in place? --------------------
 UPGRADE=0
-if [[ -f "$TARGET" ]] && grep -q '^# sealedmc:' "$TARGET" 2>/dev/null; then
+if [[ -f "$TARGET" ]] && is_wrapper "$TARGET"; then
   UPGRADE=1
 fi
 
@@ -72,7 +93,12 @@ found_mc=""
 while IFS= read -r candidate; do
   [[ -n "$candidate" ]] || continue
   # Our own wrapper (or a previous install of it) does not count.
-  grep -q '^# sealedmc:' "$candidate" 2>/dev/null && continue
+  is_wrapper "$candidate" && continue
+  if ! is_minio_mc "$candidate"; then
+    warn "$candidate is not the MinIO client (Midnight Commander?)."
+    warn "The wrapper will shadow it wherever $INSTALL_DIR comes first on PATH."
+    continue
+  fi
   found_mc="$candidate"
   break
 done < <(type -a -p mc 2>/dev/null || true)
@@ -107,10 +133,12 @@ for candidate in \
   "${MC_BIN:-}" \
   "$LIBEXEC_DIR/mc" \
   "/usr/local/libexec/mc" \
-  "/opt/minio/mc"
+  "/opt/minio/mc" \
+  $(type -a -p mcli 2>/dev/null || true)
 do
   [[ -n "$candidate" && -x "$candidate" ]] || continue
-  grep -q '^# sealedmc:' "$candidate" 2>/dev/null && continue
+  is_wrapper "$candidate" && continue
+  is_minio_mc "$candidate" || { warn "ignoring $candidate: not the MinIO client"; continue; }
   real_mc="$candidate"
   break
 done
@@ -124,12 +152,16 @@ if [[ -z "$real_mc" ]]; then
   info "To download it fresh:"
   info ""
   info "    mkdir -p $LIBEXEC_DIR"
-  info "    curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o $LIBEXEC_DIR/mc"
+  info "    curl -fsSL $(mc_download_url) -o $LIBEXEC_DIR/mc"
   info "    chmod +x $LIBEXEC_DIR/mc"
   info ""
   exit 1
 fi
 ok "found the real MinIO client at $real_mc"
+
+if [[ "$(basename "$real_mc")" == mcli ]] && command -v mcli >/dev/null 2>&1; then
+  warn "mcli is on your PATH; running it directly bypasses sealedmc."
+fi
 
 # --- fetch the wrapper -----------------------------------------------------
 tmp="$(mktemp)"
