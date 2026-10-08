@@ -85,6 +85,11 @@ export SEALEDMC_ACTIVE=1
 # shell identifier. Names containing "-" or "." cannot be supported.
 valid_alias() { [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; }
 
+require_valid_alias() {
+  valid_alias "$1" || die "alias '$1' cannot be used.
+Names must match [A-Za-z_][A-Za-z0-9_]* because mc reads them as MC_HOST_<name>."
+}
+
 store_path() { printf '%s/%s.url.asc' "$STORE" "$1"; }
 
 recipient() {
@@ -138,8 +143,7 @@ prompt_tty() {
 cmd_alias_set() {
   local name="$1" url="$2" ak="${3:-}" sk="${4:-}"
 
-  valid_alias "$name" || die "alias '$name' cannot be used.
-Names must match [A-Za-z_][A-Za-z0-9_]* because mc reads them as MC_HOST_$name."
+  require_valid_alias "$name"
   [[ "$url" =~ ^https?://[^/@]+/?$ ]] \
     || die "url must be a bare endpoint like https://minio.example.com (no path, no credentials)"
 
@@ -177,6 +181,7 @@ Names must match [A-Za-z_][A-Za-z0-9_]* because mc reads them as MC_HOST_$name."
 }
 
 cmd_alias_remove() {
+  require_valid_alias "$1"
   local f; f="$(store_path "$1")"
   [[ -e "$f" ]] || die "no stored credentials for alias '$1'"
   rm -f -- "$f"
