@@ -46,22 +46,39 @@ is_self() {
   [[ "$candidate" == "$SELF" ]]
 }
 
+# On many Linux distributions /usr/bin/mc is Midnight Commander, so a binary
+# called "mc" is only accepted as a fallback if it identifies as MinIO's.
+is_minio_mc() {
+  "$1" --version 2>/dev/null | grep -q 'RELEASE\.'
+}
+
 find_mc_binary() {
-  local candidates=()
-  [[ -n "${MC_BIN:-}" ]] && candidates+=("$MC_BIN")
-  [[ -r "$MC_PATH_FILE" ]] && candidates+=("$(head -n1 "$MC_PATH_FILE")")
-  candidates+=(
-    "$HOME/.local/libexec/mc"
-    "/usr/local/libexec/mc"
-    "/opt/minio/mc"
-    "/usr/local/bin/mc"
-    "/usr/bin/mc"
-  )
+  # Explicit configuration is trusted as long as it is not this wrapper.
+  local explicit=()
+  [[ -n "${MC_BIN:-}" ]] && explicit+=("$MC_BIN")
+  [[ -r "$MC_PATH_FILE" ]] && explicit+=("$(head -n1 "$MC_PATH_FILE")")
 
   local c
-  for c in "${candidates[@]}"; do
+  for c in ${explicit[@]+"${explicit[@]}"}; do
     [[ -n "$c" && -x "$c" ]] || continue
     is_self "$c" && continue
+    printf '%s' "$c"
+    return 0
+  done
+
+  # Some distributions ship the MinIO client as "mcli".
+  for c in \
+    "$HOME/.local/libexec/mc" \
+    "/usr/local/libexec/mc" \
+    "/opt/minio/mc" \
+    "/usr/local/bin/mcli" \
+    "/usr/bin/mcli" \
+    "/usr/local/bin/mc" \
+    "/usr/bin/mc"
+  do
+    [[ -x "$c" ]] || continue
+    is_self "$c" && continue
+    is_minio_mc "$c" || continue
     printf '%s' "$c"
     return 0
   done
@@ -72,10 +89,12 @@ if [[ -n "${SEALEDMC_ACTIVE:-}" ]]; then
   die "recursion detected: the resolved mc binary is this wrapper. Set MC_BIN to the real mc."
 fi
 
-MC_REAL="$(find_mc_binary)" || die "cannot find the real mc binary.
-Set MC_BIN, or write its absolute path to $MC_PATH_FILE"
-
+# Exported before probing candidates, so that running another copy of this
+# wrapper with --version fails instead of recursing.
 export SEALEDMC_ACTIVE=1
+
+MC_REAL="$(find_mc_binary)" || die "cannot find the real MinIO client binary.
+Set MC_BIN, or write its absolute path to $MC_PATH_FILE"
 
 # ---------------------------------------------------------------------------
 # Helpers
