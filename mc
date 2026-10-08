@@ -231,11 +231,14 @@ fi
 # ---------------------------------------------------------------------------
 # Any other command: export credentials for every alias it references
 # ---------------------------------------------------------------------------
+after_dd=0
 for arg in "$@"; do
-  case "$arg" in
-    --) break ;;
-    -*) continue ;;
-  esac
+  if (( ! after_dd )); then
+    case "$arg" in
+      --) after_dd=1; continue ;;
+      -*) continue ;;
+    esac
+  fi
   candidate="${arg%%/*}"
   valid_alias "$candidate" || continue
   [[ -r "$(store_path "$candidate")" ]] || continue
