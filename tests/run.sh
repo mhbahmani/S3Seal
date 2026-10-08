@@ -495,7 +495,7 @@ test_aws_credential_process_prints_json_only() {
   run_out "$ROOT/s3seal" enable aws
   run_out "$ROOT/s3seal" credential-process aws prod
   assert_rc 0
-  [[ "$(printf '%s\n' "$OUT" | wc -l)" == 1 ]] || fail "stdout is not a single line: $OUT"
+  [[ "$(printf '%s\n' "$OUT" | wc -l | tr -d " ")" == 1 ]] || fail "stdout is not a single line: $OUT"
   [[ "$OUT" == '{"Version":1,"AccessKeyId":"AKPROD1","SecretAccessKey":"SKPROD/1+x"}' ]] || fail "json: $OUT"
   run_out "$ROOT/s3seal" credential-process aws temp
   assert_rc 1
