@@ -93,14 +93,15 @@ Names must match [A-Za-z_][A-Za-z0-9_]* because mc reads them as MC_HOST_<name>.
 store_path() { printf '%s/%s.url.asc' "$STORE" "$1"; }
 
 recipient() {
+  local r=''
   if [[ -n "${SEALEDMC_GPG_RECIPIENT:-}" ]]; then
-    printf '%s' "$SEALEDMC_GPG_RECIPIENT"
+    r="$SEALEDMC_GPG_RECIPIENT"
   elif [[ -r "$RECIPIENT_FILE" ]]; then
-    tr -d '[:space:]' < "$RECIPIENT_FILE"
-  else
-    die "no GPG recipient configured.
-Set SEALEDMC_GPG_RECIPIENT, or write a key id / email to $RECIPIENT_FILE"
+    r="$(tr -d '[:space:]' < "$RECIPIENT_FILE")"
   fi
+  [[ -n "$r" ]] || die "no GPG recipient configured.
+Set SEALEDMC_GPG_RECIPIENT, or write a key id / email to $RECIPIENT_FILE"
+  printf '%s' "$r"
 }
 
 # mc splits MC_HOST_<alias> with the regexes
@@ -127,7 +128,7 @@ decrypt_alias() {
 # mc (e.g. "cat file | mc pipe ...") does not consume the prompt input.
 prompt_tty() {
   local varname="$1" text="$2" silent="${3:-}" value
-  [[ -r /dev/tty ]] || die "no terminal available to read '$text'"
+  { : < /dev/tty; } 2>/dev/null || die "no terminal available to read '$text'"
   if [[ "$silent" == "silent" ]]; then
     read -rs -p "$text" value < /dev/tty; echo > /dev/tty
   else
@@ -146,6 +147,10 @@ cmd_alias_set() {
   require_valid_alias "$name"
   [[ "$url" =~ ^https?://[^/@]+/?$ ]] \
     || die "url must be a bare endpoint like https://minio.example.com (no path, no credentials)"
+
+  # Fail before asking for secrets if they could not be stored anyway.
+  local rcpt
+  rcpt="$(recipient)"
 
   [[ -n "$ak" ]] || prompt_tty ak 'Access key: '
   [[ -n "$sk" ]] || prompt_tty sk 'Secret key: ' silent
@@ -174,7 +179,7 @@ cmd_alias_set() {
     mkdir -p "$STORE"
     printf '%s' "$full" \
       | gpg --quiet --batch --yes --armor --encrypt \
-            --recipient "$(recipient)" --output "$tmp"
+            --recipient "$rcpt" --output "$tmp"
     mv -f "$tmp" "$target"
   )
   printf 'Stored alias %s -> %s://%s (encrypted)\n' "$name" "$scheme" "$host"
