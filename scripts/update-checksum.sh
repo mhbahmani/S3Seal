@@ -7,7 +7,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-FILES="mc aws s3seal lib/common.sh lib/ini.sh lib/aws.sh"
+FILES="bin/mc bin/aws bin/s3seal lib/common.sh lib/ini.sh lib/aws.sh lib/mc.sh"
 
 sha() {
   if command -v sha256sum >/dev/null 2>&1; then

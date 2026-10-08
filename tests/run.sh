@@ -13,7 +13,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-WRAPPER="$ROOT/mc"
+WRAPPER="$ROOT/bin/mc"
 TEST_BASH="${TEST_BASH:-bash}"
 FILTER="${1:-}"
 
@@ -465,7 +465,7 @@ test_ini_keeps_backslashes_and_mode() {
 # --- AWS: enable, credential_process, disable -------------------------------
 test_aws_enable_seals_plaintext_profiles() {
   aws_env; seed_credentials
-  run_out "$ROOT/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws
   assert_rc 0
   assert_out "Sealed AWS profile prod"
   assert_out "Sealed AWS profile other"
@@ -474,17 +474,17 @@ test_aws_enable_seals_plaintext_profiles() {
   assert_in "$AWS_SHARED_CREDENTIALS_FILE" "# keep this comment"
   assert_in "$AWS_SHARED_CREDENTIALS_FILE" "TOKTEMP"
   assert_in "$AWS_CONFIG_FILE" "[profile prod]"
-  assert_in "$AWS_CONFIG_FILE" "credential_process = $ROOT/s3seal credential-process aws prod"
+  assert_in "$AWS_CONFIG_FILE" "credential_process = $ROOT/bin/s3seal credential-process aws prod"
   assert_file "$S3SEAL_CONFIG_DIR/aws/prod.secret.asc"
   assert_not_in "$S3SEAL_CONFIG_DIR/aws/prod.secret.asc" AKPROD1
-  [[ "$(readlink "$HOME/.local/bin/aws")" == "$ROOT/aws" ]] || fail "aws shim not linked"
+  [[ "$(readlink "$HOME/.local/bin/aws")" == "$ROOT/bin/aws" ]] || fail "aws shim not linked"
 }
 
 test_aws_enable_is_repeatable() {
   aws_env; seed_credentials
-  run_out "$ROOT/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws
   assert_rc 0
-  run_out "$ROOT/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws
   assert_rc 0
   assert_in "$AWS_CONFIG_FILE" "credential_process"
   [[ "$(grep -c 'credential_process' "$AWS_CONFIG_FILE")" == 2 ]] || fail "credential_process duplicated"
@@ -492,18 +492,18 @@ test_aws_enable_is_repeatable() {
 
 test_aws_credential_process_prints_json_only() {
   aws_env; seed_credentials
-  run_out "$ROOT/s3seal" enable aws
-  run_out "$ROOT/s3seal" credential-process aws prod
+  run_out "$ROOT/bin/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" credential-process aws prod
   assert_rc 0
   [[ "$(printf '%s\n' "$OUT" | wc -l | tr -d " ")" == 1 ]] || fail "stdout is not a single line: $OUT"
   [[ "$OUT" == '{"Version":1,"AccessKeyId":"AKPROD1","SecretAccessKey":"SKPROD/1+x"}' ]] || fail "json: $OUT"
-  run_out "$ROOT/s3seal" credential-process aws temp
+  run_out "$ROOT/bin/s3seal" credential-process aws temp
   assert_rc 1
 }
 
 test_aws_passthrough_leaves_keys_out_of_args() {
   aws_env; seed_credentials
-  run_out "$ROOT/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws
   run_out "$HOME/.local/bin/aws" --profile prod s3 ls
   assert_rc 0
   assert_aws_log "AWS: [--profile] [prod] [s3] [ls]"
@@ -512,15 +512,15 @@ test_aws_passthrough_leaves_keys_out_of_args() {
 
 test_aws_set_secret_seals_then_completes() {
   aws_env
-  run_out "$ROOT/aws" configure set aws_access_key_id AKNEW --profile fresh
+  run_out "$ROOT/bin/aws" configure set aws_access_key_id AKNEW --profile fresh
   assert_rc 0
   assert_not_in "$AWS_SHARED_CREDENTIALS_FILE" AKNEW
   assert_file "$S3SEAL_CONFIG_DIR/aws/fresh.secret.asc"
-  run_out "$ROOT/s3seal" credential-process aws fresh
+  run_out "$ROOT/bin/s3seal" credential-process aws fresh
   assert_rc 1
-  run_out "$ROOT/aws" configure set aws_secret_access_key SKNEW --profile fresh
+  run_out "$ROOT/bin/aws" configure set aws_secret_access_key SKNEW --profile fresh
   assert_rc 0
-  run_out "$ROOT/s3seal" credential-process aws fresh
+  run_out "$ROOT/bin/s3seal" credential-process aws fresh
   assert_rc 0
   [[ "$OUT" == '{"Version":1,"AccessKeyId":"AKNEW","SecretAccessKey":"SKNEW"}' ]] || fail "json: $OUT"
   ! grep -q 'SKNEW' "$FAKE_AWS_LOG" || fail "secret reached the real aws"
@@ -528,11 +528,11 @@ test_aws_set_secret_seals_then_completes() {
 
 test_aws_configure_get_reads_store() {
   aws_env; seed_credentials
-  run_out "$ROOT/s3seal" enable aws
-  run_out "$ROOT/aws" configure get aws_secret_access_key --profile prod
+  run_out "$ROOT/bin/s3seal" enable aws
+  run_out "$ROOT/bin/aws" configure get aws_secret_access_key --profile prod
   assert_rc 0
   [[ "$OUT" == "SKPROD/1+x" ]] || fail "got: $OUT"
-  run_out "$ROOT/aws" configure get region --profile prod
+  run_out "$ROOT/bin/aws" configure get region --profile prod
   assert_aws_log "[configure] [get] [region] [--profile] [prod]"
 }
 
@@ -540,18 +540,18 @@ test_aws_configure_interactive() {
   command -v python3 >/dev/null 2>&1 || return 0
   aws_env
   OUT="$(printf 'AWS Access Key ID\tAKTTY\nAWS Secret Access Key\tSKTTY/x\nDefault region name\tus-west-2\nDefault output format\t\n' \
-    | python3 "$ROOT/tests/pty_drive.py" "$TEST_BASH" "$ROOT/aws" configure --profile tty)"
+    | python3 "$ROOT/tests/pty_drive.py" "$TEST_BASH" "$ROOT/bin/aws" configure --profile tty)"
   assert_out "Stored AWS credentials for profile tty"
   assert_not_out "SKTTY"
   assert_file "$S3SEAL_CONFIG_DIR/aws/tty.secret.asc"
   assert_aws_log "[configure] [set] [region] [us-west-2] [--profile] [tty]"
-  run_out "$ROOT/s3seal" credential-process aws tty
+  run_out "$ROOT/bin/s3seal" credential-process aws tty
   [[ "$OUT" == '{"Version":1,"AccessKeyId":"AKTTY","SecretAccessKey":"SKTTY/x"}' ]] || fail "json: $OUT"
 }
 
 test_aws_import_is_sealed() {
   aws_env
-  run_out "$ROOT/aws" configure import --csv "$T/whatever.csv"
+  run_out "$ROOT/bin/aws" configure import --csv "$T/whatever.csv"
   assert_rc 0
   assert_not_in "$AWS_SHARED_CREDENTIALS_FILE" AKIMPORT
   assert_file "$S3SEAL_CONFIG_DIR/aws/imported.secret.asc"
@@ -559,8 +559,8 @@ test_aws_import_is_sealed() {
 
 test_aws_disable_restores_plaintext() {
   aws_env; seed_credentials
-  run_out "$ROOT/s3seal" enable aws
-  run_out "$ROOT/s3seal" disable aws --yes
+  run_out "$ROOT/bin/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" disable aws --yes
   assert_rc 0
   assert_out "Unsealed AWS profile prod"
   assert_in "$AWS_SHARED_CREDENTIALS_FILE" "aws_access_key_id = AKPROD1"
@@ -573,17 +573,17 @@ test_aws_disable_restores_plaintext() {
 test_aws_disable_requires_confirmation() {
   command -v setsid >/dev/null 2>&1 || return 0
   aws_env; seed_credentials
-  run_out "$ROOT/s3seal" enable aws
-  OUT="$(setsid "$TEST_BASH" "$ROOT/s3seal" disable aws < /dev/null 2>&1)" && RC=0 || RC=$?
+  run_out "$ROOT/bin/s3seal" enable aws
+  OUT="$(setsid "$TEST_BASH" "$ROOT/bin/s3seal" disable aws < /dev/null 2>&1)" && RC=0 || RC=$?
   assert_rc 1; assert_out "pass --yes"
   assert_file "$S3SEAL_CONFIG_DIR/aws/prod.secret.asc"
 }
 
 test_aws_status_reports_plaintext() {
   aws_env; seed_credentials
-  run_out "$ROOT/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws
   printf '[late]\naws_access_key_id = AKLATE\naws_secret_access_key = SKLATE\n' >> "$AWS_SHARED_CREDENTIALS_FILE"
-  run_out "$ROOT/s3seal" status
+  run_out "$ROOT/bin/s3seal" status
   assert_out "sealed:     prod"
   assert_out "PLAINTEXT:  late"
 }
@@ -591,7 +591,7 @@ test_aws_status_reports_plaintext() {
 test_aws_enable_without_cli_fails() {
   aws_env; seed_credentials
   rm -f "$T/bin/aws"
-  run_out "$ROOT/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws
   assert_rc 1
   assert_in "$AWS_SHARED_CREDENTIALS_FILE" "AKPROD1"
 }
@@ -612,11 +612,11 @@ test_install_from_checkout() {
   assert_out "not the MinIO client (Midnight Commander?)"
   assert_out "found the real MinIO client at $FAKE_MC"
   assert_out "s3seal enable aws"
-  for f in mc aws s3seal lib/common.sh lib/ini.sh lib/aws.sh; do
+  for f in bin/mc bin/aws bin/s3seal lib/common.sh lib/ini.sh lib/aws.sh lib/mc.sh; do
     cmp -s "$ROOT/$f" "$HOME/.local/share/s3seal/$f" || fail "$f not installed"
   done
-  [[ "$(readlink "$HOME/.local/bin/mc")" == "$HOME/.local/share/s3seal/mc" ]] || fail "mc not linked"
-  [[ "$(readlink "$HOME/.local/bin/s3seal")" == "$HOME/.local/share/s3seal/s3seal" ]] || fail "s3seal not linked"
+  [[ "$(readlink "$HOME/.local/bin/mc")" == "$HOME/.local/share/s3seal/bin/mc" ]] || fail "mc not linked"
+  [[ "$(readlink "$HOME/.local/bin/s3seal")" == "$HOME/.local/share/s3seal/bin/s3seal" ]] || fail "s3seal not linked"
   assert_no_file "$HOME/.local/bin/aws"
   [[ "$(cat "$S3SEAL_CONFIG_DIR/mc-path")" == "$FAKE_MC" ]] || fail "mc-path not recorded"
 }
@@ -680,13 +680,13 @@ test_install_verifies_download_checksum() {
   assert_file "$HOME/.local/share/s3seal/lib/aws.sh"
 
   rm -rf "$T/tampered"; mkdir -p "$T/tampered"
-  cp -r "$ROOT/mc" "$ROOT/aws" "$ROOT/s3seal" "$ROOT/lib" "$T/tampered/"
-  set_version "$T/tampered/s3seal" tampered
+  cp -r "$ROOT/bin" "$ROOT/lib" "$T/tampered/"
+  set_version "$T/tampered/bin/s3seal" tampered
   fake_curl "$T/tampered"
   rm -rf "$HOME/.local/share/s3seal"
   OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 1; assert_out "checksum mismatch"
-  assert_no_file "$HOME/.local/share/s3seal/s3seal"
+  assert_no_file "$HOME/.local/share/s3seal/bin/s3seal"
 
   OUT="$(S3SEAL_REF=some-branch "$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0; assert_out "not verified"
@@ -694,7 +694,7 @@ test_install_verifies_download_checksum() {
 
 test_install_checksums_are_current() {
   local f actual
-  for f in mc aws s3seal lib/common.sh lib/ini.sh lib/aws.sh; do
+  for f in bin/mc bin/aws bin/s3seal lib/common.sh lib/ini.sh lib/aws.sh lib/mc.sh; do
     if command -v sha256sum >/dev/null 2>&1; then
       actual="$(sha256sum "$ROOT/$f" | cut -d' ' -f1)"
     else
@@ -719,10 +719,10 @@ test_uninstall_refuses_while_aws_is_sealed() {
   install_env
   aws_env; seed_credentials
   "$TEST_BASH" "$ROOT/install.sh" >/dev/null 2>&1 || fail "install failed"
-  run_out "$HOME/.local/share/s3seal/s3seal" enable aws
+  run_out "$HOME/.local/share/s3seal/bin/s3seal" enable aws
   OUT="$("$TEST_BASH" "$ROOT/uninstall.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 1; assert_out "Run \"s3seal disable aws\" first"
-  assert_file "$HOME/.local/share/s3seal/s3seal"
+  assert_file "$HOME/.local/share/s3seal/bin/s3seal"
 }
 
 test_uninstall_purge_needs_confirmation() {
@@ -747,13 +747,13 @@ test_install_twice_is_idempotent() {
   assert_not_out "Next steps"
   assert_not_out "installed s3seal"
   assert_not_out "linked mc"
-  [[ "$(readlink "$HOME/.local/bin/s3seal")" == "$HOME/.local/share/s3seal/s3seal" ]] || fail "link lost"
+  [[ "$(readlink "$HOME/.local/bin/s3seal")" == "$HOME/.local/share/s3seal/bin/s3seal" ]] || fail "link lost"
 }
 
 test_install_reports_upgrade_over_older_version() {
   install_env
   "$TEST_BASH" "$ROOT/install.sh" >/dev/null 2>&1 || fail "first install failed"
-  set_version "$HOME/.local/share/s3seal/s3seal" 1.0.0
+  set_version "$HOME/.local/share/s3seal/bin/s3seal" 1.0.0
   OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
   assert_out "Upgrading s3seal 1.0.0 -> 1.1.0"
@@ -777,10 +777,10 @@ test_upgrade_check_and_latest() {
   fake_curl "$ROOT"
   OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
-  run_out "$HOME/.local/share/s3seal/s3seal" upgrade --check
+  run_out "$HOME/.local/share/s3seal/bin/s3seal" upgrade --check
   assert_rc 0
   assert_out "installed 1.1.0, available 1.1.0 (mhbahmani/s3seal@master)"
-  run_out "$HOME/.local/share/s3seal/s3seal" upgrade
+  run_out "$HOME/.local/share/s3seal/bin/s3seal" upgrade
   assert_rc 0
   assert_out "already the latest version"
 }
@@ -790,18 +790,18 @@ test_upgrade_replaces_older_install() {
   fake_curl "$ROOT"
   OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
-  set_version "$HOME/.local/share/s3seal/s3seal" 1.0.0
-  run_out "$HOME/.local/share/s3seal/s3seal" upgrade --check
+  set_version "$HOME/.local/share/s3seal/bin/s3seal" 1.0.0
+  run_out "$HOME/.local/share/s3seal/bin/s3seal" upgrade --check
   assert_out "installed 1.0.0, available 1.1.0"
-  run_out "$HOME/.local/share/s3seal/s3seal" upgrade
+  run_out "$HOME/.local/share/s3seal/bin/s3seal" upgrade
   assert_rc 0
   assert_out "Upgrading s3seal 1.0.0 -> 1.1.0"
-  run_out "$HOME/.local/share/s3seal/s3seal" --version
+  run_out "$HOME/.local/share/s3seal/bin/s3seal" --version
   assert_out "s3seal 1.1.0"
 }
 
 test_upgrade_refuses_a_checkout() {
-  run_entry "$ROOT/s3seal" upgrade --check
+  run_entry "$ROOT/bin/s3seal" upgrade --check
   assert_rc 1
   assert_out "installed copy, not on a git checkout"
 }

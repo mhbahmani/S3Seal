@@ -24,7 +24,7 @@ is_secret_key()  {
   return 1
 }
 
-credential_process_cmd() { printf '%s credential-process aws %s' "$S3SEAL_HOME/s3seal" "$1"; }
+credential_process_cmd() { printf '%s credential-process aws %s' "$S3SEAL_HOME/bin/s3seal" "$1"; }
 
 # Store record: key=value lines. Only newlines are forbidden in values.
 aws_store_put() {  # PROFILE AK SK [TOKEN]

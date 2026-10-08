@@ -77,7 +77,7 @@ encrypt_private() {
 is_s3seal_entry() {
   local r
   r="$(resolve_path "$1")"
-  [[ "$r" == "$S3SEAL_HOME/mc" || "$r" == "$S3SEAL_HOME/aws" || "$r" == "$S3SEAL_HOME/s3seal" ]]
+  [[ "$r" == "$S3SEAL_HOME/bin/mc" || "$r" == "$S3SEAL_HOME/bin/aws" || "$r" == "$S3SEAL_HOME/bin/s3seal" ]]
 }
 
 # Print the first executable NAME on PATH that is not a s3seal entry point.
