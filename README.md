@@ -61,8 +61,11 @@ s3seal upgrade --check   # show installed and available versions
 s3seal upgrade           # install the latest release
 s3seal --version
 
-./uninstall.sh           # remove commands, keep encrypted credentials
-./uninstall.sh --purge   # also delete encrypted credentials, after confirmation
+# remove commands, keep encrypted credentials
+curl -fsSL https://raw.githubusercontent.com/mhbahmani/s3seal/master/uninstall.sh | bash
+
+# also delete encrypted credentials, after confirmation
+curl -fsSL https://raw.githubusercontent.com/mhbahmani/s3seal/master/uninstall.sh | bash -s -- --purge
 ```
 
 `s3seal upgrade` downloads the installer from the repository the copy came
