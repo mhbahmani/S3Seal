@@ -17,7 +17,17 @@
 - `lib/` with shared helpers, a minimal INI editor, and the AWS support.
 - Installed files are verified one by one against checksums.
 
+### Added
+
+- `s3seal upgrade [--check] [--force]`: upgrades an installed copy from the
+  repository it was installed from.
+
 ### Changed
+
+- Running the installer again reports whether s3seal is fresh, up to date,
+  refreshed, or upgraded, and only prints next steps for a fresh install.
+- Installed files are replaced atomically, so an upgrade can run while
+  s3seal is in use.
 
 - `uninstall.sh` refuses while AWS profiles are sealed.
 - The installer no longer touches the AWS CLI; it installs the commands only.

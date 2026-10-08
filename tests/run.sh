@@ -729,6 +729,76 @@ test_uninstall_purge_needs_confirmation() {
   assert_no_file "$S3SEAL_CONFIG_DIR"
 }
 
+test_install_twice_is_idempotent() {
+  install_env
+  cp "$MIDNIGHT" "$T/bin/mc"
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0; assert_out "Next steps"
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  assert_out "s3seal 1.1.0 is already installed and up to date"
+  assert_not_out "Next steps"
+  assert_not_out "installed s3seal"
+  assert_not_out "linked mc"
+  [[ "$(readlink "$HOME/.local/bin/s3seal")" == "$HOME/.local/share/s3seal/s3seal" ]] || fail "link lost"
+}
+
+test_install_reports_upgrade_over_older_version() {
+  install_env
+  "$TEST_BASH" "$ROOT/install.sh" >/dev/null 2>&1 || fail "first install failed"
+  sed -i 's/^VERSION=.*/VERSION="1.0.0"/' "$HOME/.local/share/s3seal/s3seal"
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  assert_out "Upgrading s3seal 1.0.0 -> 1.1.0"
+  assert_out "installed s3seal 1.1.0"
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_out "already installed and up to date"
+}
+
+test_install_reports_refresh_of_changed_files() {
+  install_env
+  "$TEST_BASH" "$ROOT/install.sh" >/dev/null 2>&1 || fail "first install failed"
+  echo '# local edit' >> "$HOME/.local/share/s3seal/lib/aws.sh"
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  assert_out "already installed. Refreshing 1 changed file(s)"
+  ! grep -q 'local edit' "$HOME/.local/share/s3seal/lib/aws.sh" || fail "changed file not restored"
+}
+
+test_upgrade_check_and_latest() {
+  install_env
+  fake_curl "$ROOT"
+  OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  run_out "$HOME/.local/share/s3seal/s3seal" upgrade --check
+  assert_rc 0
+  assert_out "installed 1.1.0, available 1.1.0 (mhbahmani/s3seal@master)"
+  run_out "$HOME/.local/share/s3seal/s3seal" upgrade
+  assert_rc 0
+  assert_out "already the latest version"
+}
+
+test_upgrade_replaces_older_install() {
+  install_env
+  fake_curl "$ROOT"
+  OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  sed -i 's/^VERSION=.*/VERSION="1.0.0"/' "$HOME/.local/share/s3seal/s3seal"
+  run_out "$HOME/.local/share/s3seal/s3seal" upgrade --check
+  assert_out "installed 1.0.0, available 1.1.0"
+  run_out "$HOME/.local/share/s3seal/s3seal" upgrade
+  assert_rc 0
+  assert_out "Upgrading s3seal 1.0.0 -> 1.1.0"
+  run_out "$HOME/.local/share/s3seal/s3seal" --version
+  assert_out "s3seal 1.1.0"
+}
+
+test_upgrade_refuses_a_checkout() {
+  run_entry "$ROOT/s3seal" upgrade --check
+  assert_rc 1
+  assert_out "installed copy, not on a git checkout"
+}
+
 # ---------------------------------------------------------------------------
 for t in $(declare -F | sed -n 's/^declare -f test_//p'); do
   run_test "$t"

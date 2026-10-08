@@ -36,6 +36,29 @@ echo 'you@example.com' > ~/.config/s3seal/recipient
 
 or set `S3SEAL_GPG_RECIPIENT`.
 
+Running the installer again is safe. It reports what it found:
+
+- `Installing s3seal X.Y.Z.`: a fresh install.
+- `s3seal X.Y.Z is already installed and up to date.`: nothing is copied.
+- `Refreshing N changed file(s).`: the same version with local changes is restored.
+- `Upgrading s3seal A -> B.`: an older install is replaced.
+
+Files are replaced atomically, so an upgrade can run while s3seal is in use.
+
+## Upgrading
+
+```bash
+s3seal upgrade --check     # show installed and available versions
+s3seal upgrade             # fetch and install the latest release
+s3seal upgrade --force     # reinstall even when the version matches
+```
+
+`upgrade` uses the repository the installed copy came from. It downloads the
+installer and runs it, so every file is checked against the checksums in that
+installer. The installer itself is trusted in the same way as the `curl | bash`
+command, which means you trust the repository you installed from. It does not
+work on a git checkout.
+
 ## AWS CLI
 
 ```bash
