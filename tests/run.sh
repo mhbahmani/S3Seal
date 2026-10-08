@@ -22,6 +22,14 @@ trap 'gpgconf --homedir "$WORK/gnupg" --kill all >/dev/null 2>&1; rm -rf "$WORK"
 
 PASS=0 FAIL=0 FAILED=()
 
+# gpg lives outside /usr/bin on macOS (Homebrew), so tests add its directory to PATH.
+GPG_DIR="$(dirname "$(command -v gpg)")"
+
+# Portable in-place edit: BSD sed (macOS) and GNU sed take -i differently.
+set_version() {  # FILE VERSION
+  sed "s/^VERSION=.*/VERSION=\"$2\"/" "$1" > "$1.tmp" && mv -f "$1.tmp" "$1"
+}
+
 export GNUPGHOME="$WORK/gnupg"
 mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
 gpg --batch --quiet --passphrase '' --quick-gen-key 's3seal test <test@s3seal.invalid>' \
@@ -47,7 +55,6 @@ case "$args" in
 esac
 exit 0
 EOF2
-sed -i 's/s3sealprobe/s3sealprobe/' "$FAKE_MC"
 chmod +x "$FAKE_MC"
 
 FAKE_AWS="$WORK/fake-aws"
@@ -118,7 +125,7 @@ store() { run_mc alias set "$1" "$2" "$3" "$4"; [[ "$RC" == 0 ]] || fail "store 
 aws_env() {
   mkdir -p "$T/bin" "$T/aws"
   cp "$FAKE_AWS" "$T/bin/aws"
-  export PATH="$T/bin:/usr/bin:/bin"
+  export PATH="$T/bin:$GPG_DIR:/usr/bin:/bin"
   export AWS_CONFIG_FILE="$T/aws/config"
   export AWS_SHARED_CREDENTIALS_FILE="$T/aws/credentials"
   export FAKE_AWS_LOG="$T/aws.log"
@@ -592,7 +599,7 @@ test_aws_enable_without_cli_fails() {
 # --- installer and uninstaller ----------------------------------------------
 install_env() {
   mkdir -p "$T/bin"
-  export PATH="$T/bin:/usr/bin:/bin"
+  export PATH="$T/bin:$GPG_DIR:/usr/bin:/bin"
   export S3SEAL_INSTALL_DIR="$HOME/.local/bin"
   export S3SEAL_SHARE_DIR="$HOME/.local/share/s3seal"
 }
@@ -674,7 +681,7 @@ test_install_verifies_download_checksum() {
 
   rm -rf "$T/tampered"; mkdir -p "$T/tampered"
   cp -r "$ROOT/mc" "$ROOT/aws" "$ROOT/s3seal" "$ROOT/lib" "$T/tampered/"
-  sed -i 's/^VERSION=.*/VERSION="tampered"/' "$T/tampered/s3seal"
+  set_version "$T/tampered/s3seal" tampered
   fake_curl "$T/tampered"
   rm -rf "$HOME/.local/share/s3seal"
   OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
@@ -746,7 +753,7 @@ test_install_twice_is_idempotent() {
 test_install_reports_upgrade_over_older_version() {
   install_env
   "$TEST_BASH" "$ROOT/install.sh" >/dev/null 2>&1 || fail "first install failed"
-  sed -i 's/^VERSION=.*/VERSION="1.0.0"/' "$HOME/.local/share/s3seal/s3seal"
+  set_version "$HOME/.local/share/s3seal/s3seal" 1.0.0
   OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
   assert_out "Upgrading s3seal 1.0.0 -> 1.1.0"
@@ -783,7 +790,7 @@ test_upgrade_replaces_older_install() {
   fake_curl "$ROOT"
   OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
-  sed -i 's/^VERSION=.*/VERSION="1.0.0"/' "$HOME/.local/share/s3seal/s3seal"
+  set_version "$HOME/.local/share/s3seal/s3seal" 1.0.0
   run_out "$HOME/.local/share/s3seal/s3seal" upgrade --check
   assert_out "installed 1.0.0, available 1.1.0"
   run_out "$HOME/.local/share/s3seal/s3seal" upgrade
