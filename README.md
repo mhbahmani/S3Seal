@@ -42,6 +42,7 @@ mc cp prod/bucket/x dev/bucket/     ->  decrypts "prod" and "dev", exports both,
 - `bash` 4+ (or macOS `bash` 3.2)
 - `gpg` with a key pair of your own (`gpg --full-generate-key`)
 - the real MinIO client binary — `sealedmc` wraps yours, it does not bundle one
+  (installed as `mc`, or as `mcli` on some distributions)
 
 ## Installation
 
@@ -49,7 +50,9 @@ mc cp prod/bucket/x dev/bucket/     ->  decrypts "prod" and "dev", exports both,
 curl -fsSL https://raw.githubusercontent.com/mhbahmani/sealedmc/master/install.sh | bash
 ```
 
-The wrapper installs to `~/.local/bin/mc`.
+The wrapper installs to `~/.local/bin/mc`. The installer checks the
+downloaded wrapper against the SHA-256 embedded in `install.sh`, and refuses
+to install on a mismatch.
 
 ### The real `mc` must be off your PATH
 
@@ -58,8 +61,10 @@ reachable on `PATH` — otherwise whichever directory comes first wins, and you
 could silently keep using the unwrapped client.
 
 The installer checks for this. If it finds the real `mc` on your `PATH`, it
-prints the exact command to move it and exits without changing anything. The
-recommended layout is:
+prints the exact command to move it and exits without changing anything. An
+`mc` that is not the MinIO client (on many Linux distributions `/usr/bin/mc`
+is Midnight Commander) is left alone, with a warning that the wrapper will
+shadow it. The recommended layout is:
 
 ```
 ~/.local/bin/mc        <- this wrapper (on PATH)
@@ -114,9 +119,15 @@ mc alias set prod https://minio.example.com
 ```
 
 You are prompted for the access key and secret key on the terminal, so neither
-ends up in your shell history. Both are URL-encoded before being stored, so
-keys containing `/`, `+` or `@` work correctly. The alias is verified against
-the server, then encrypted to `~/.config/sealedmc/aliases/prod.url.asc`.
+ends up in your shell history. The alias is verified against the server, then
+encrypted to `~/.config/sealedmc/aliases/prod.url.asc`.
+
+Keys are stored verbatim, because `mc` does not percent-decode `MC_HOST_`
+values. Characters such as `/`, `+` and `@` work; a `:` in either key does not
+(mc would read it as a session token) and is rejected.
+
+Global flags work in any position, e.g. `mc --insecure alias set ...` for a
+self-signed endpoint; `--insecure` is applied to the verification step.
 
 Non-interactive form (avoid it — the keys land in your history):
 
@@ -134,6 +145,10 @@ mc alias remove prod
 Set `SEALEDMC_LIST_ENDPOINTS=1` to also show each alias's endpoint (this
 decrypts every stored alias, so expect a GPG prompt).
 
+`mc alias list` also warns if `mc`'s own config still holds plaintext
+credentials (the public `play` demo alias and mc's placeholder entries are
+ignored).
+
 ### Everything else
 
 Unchanged:
@@ -145,29 +160,32 @@ mc mirror prod/bucket dev/bucket
 mc admin info prod
 ```
 
+### Shell completion
+
+Run `mc --autocompletion` once, as with the plain client. `mc` registers the
+real binary as the completer, so completion never sees credentials. If you
+point completion at the wrapper instead (`complete -C ~/.local/bin/mc mc`), it
+hands straight over to the real `mc` without decrypting anything.
+
 ## Migrating off plaintext
 
-1. Look at what is currently stored in the clear:
+```bash
+mc alias migrate          # every alias in ~/.mc/config.json
+mc alias migrate prod     # or only the ones named
+```
 
-   ```bash
-   grep -o '"url"[^,]*' ~/.mc/config.json
-   ```
+Each alias is encrypted into the store and then removed from `mc`'s config.
+Aliases that cannot be expressed as `MC_HOST_` are skipped with a reason and
+left untouched: names that are not shell identifiers (re-add them under a new
+name with `mc alias set`), `--api S3v2` or non-`auto` `--path`, and URLs with a
+path. Existing encrypted aliases are never overwritten. The command exits
+non-zero if anything was skipped.
 
-2. Re-add each alias through the wrapper with `mc alias set`.
+Afterwards, tighten permissions on what is left:
 
-3. Remove the plaintext entries using the **real** binary, which bypasses the
-   wrapper:
-
-   ```bash
-   ~/.local/libexec/mc alias remove prod
-   ```
-
-4. Confirm nothing is left:
-
-   ```bash
-   cat ~/.mc/config.json
-   chmod 700 ~/.mc && chmod 600 ~/.mc/config.json
-   ```
+```bash
+chmod 700 ~/.mc && chmod 600 ~/.mc/config.json
+```
 
 `mc` still uses `~/.mc/` for non-credential state such as resumable `mirror`
 sessions, so do not delete the directory.
@@ -184,12 +202,16 @@ can be worked around in the wrapper.
 - **`--api` and `--path` are not supported.** `MC_HOST_` carries a URL and
   nothing else. If you need path-style addressing or a pinned signature
   version, that alias has to stay in `config.json`.
-- **`mc alias import` / `export` are not supported.**
+- **`mc alias import` / `export` and the legacy `mc config host` are not
+  supported.**
 - **Non-interactive use is awkward.** cron jobs and CI will block on a
   `pinentry` prompt unless `gpg-agent` already has the key cached. Working
   around that with a passphrase file reintroduces a plaintext secret on disk —
   for automation, prefer short-lived STS credentials (see below).
-- **Shell completion for `mc` is lost.**
+- **Remote completion is unavailable.** Completion runs without credentials,
+  so bucket and object names on encrypted aliases are not completed.
+- **The client can still be run directly.** Anything that invokes the real
+  binary by path (or `mcli`, if it is on `PATH`) bypasses the wrapper.
 - **The secret is briefly in one process's environment.** While the `mc`
   process runs, its credentials are readable via `/proc/<pid>/environ` by that
   same user and by root. This is strictly better than a file at rest, but it is
@@ -212,14 +234,18 @@ are what you have.
 | `SEALEDMC_GPG_RECIPIENT` | GPG key id or email to encrypt to |
 | `SEALEDMC_NO_VERIFY` | Skip the connection check during `mc alias set` |
 | `SEALEDMC_LIST_ENDPOINTS` | Show endpoints in `mc alias list` |
+| `SEALEDMC_DEBUG` | Always show gpg's diagnostics (otherwise only on failure) |
 | `SEALEDMC_INSTALL_DIR` | Install location (default `~/.local/bin`) |
 | `SEALEDMC_LIBEXEC_DIR` | Where the real binary is expected (default `~/.local/libexec`) |
+| `SEALEDMC_REPO`, `SEALEDMC_REF` | Install from another repository or ref (default `mhbahmani/sealedmc`, `master`) |
+| `SEALEDMC_SHA256` | Expected checksum of the wrapper when installing a non-default ref |
 
 ## Uninstall
 
 ```bash
 ./uninstall.sh            # removes the wrapper, keeps encrypted credentials
-./uninstall.sh --purge    # also deletes ~/.config/sealedmc
+./uninstall.sh --purge    # also deletes ~/.config/sealedmc, after confirmation
+./uninstall.sh --purge --yes   # without asking
 ```
 
 ## Files
@@ -231,3 +257,18 @@ are what you have.
 ~/.config/sealedmc/mc-path                path to the real binary
 ~/.config/sealedmc/aliases/<name>.url.asc one encrypted alias per file (0600)
 ```
+
+## Development
+
+```bash
+tests/run.sh                        # needs bash and gpg; python3 for the prompt test
+TEST_BASH=/bin/bash tests/run.sh    # run the scripts under another bash (e.g. 3.2)
+shellcheck mc install.sh uninstall.sh scripts/*.sh tests/run.sh
+```
+
+After changing `mc`, run `scripts/update-checksum.sh` so that `install.sh`
+expects the new wrapper; the test suite fails until you do.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
