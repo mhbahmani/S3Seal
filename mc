@@ -184,6 +184,40 @@ prompt_tty() {
 }
 
 # ---------------------------------------------------------------------------
+# Global flag handling
+#
+# mc accepts global flags anywhere on the command line, so the subcommand is
+# the first argument that is neither a flag nor a flag's value.
+# ---------------------------------------------------------------------------
+
+# Global flags that take a separate value argument.
+flag_takes_value() {
+  case "$1" in
+    -C|--config-dir|--resolve|--limit-upload|--limit-download|--custom-header|-H) return 0 ;;
+  esac
+  return 1
+}
+
+# Split "$@" into MC_FLAGS (global flags, with their values) and POSITIONAL.
+split_args() {
+  MC_FLAGS=(); POSITIONAL=()
+  local after_dd=0
+  while (( $# )); do
+    if (( after_dd )); then POSITIONAL+=("$1"); shift; continue; fi
+    case "$1" in
+      --) after_dd=1 ;;
+      -*)
+        MC_FLAGS+=("$1")
+        if flag_takes_value "$1" && (( $# > 1 )); then
+          MC_FLAGS+=("$2"); shift
+        fi ;;
+      *) POSITIONAL+=("$1") ;;
+    esac
+    shift
+  done
+}
+
+# ---------------------------------------------------------------------------
 # alias subcommand: handled entirely here, never forwarded to mc
 # ---------------------------------------------------------------------------
 
@@ -210,7 +244,12 @@ cmd_alias_set() {
   full="$scheme://$ak:$sk@$host"
 
   if [[ -z "${SEALEDMC_NO_VERIFY:-}" ]]; then
-    if MC_HOST_sealedmcprobe="$full" "$MC_REAL" ls sealedmcprobe/ >/dev/null 2>&1; then
+    local probe_flags=() f
+    for f in ${MC_FLAGS[@]+"${MC_FLAGS[@]}"}; do
+      [[ "$f" == "--insecure" ]] && probe_flags+=("$f")
+    done
+    if MC_HOST_sealedmcprobe="$full" "$MC_REAL" ${probe_flags[@]+"${probe_flags[@]}"} \
+         ls sealedmcprobe/ >/dev/null 2>&1; then
       printf 'Verified connection to %s://%s\n' "$scheme" "$host"
     else
       warn "warning: could not list buckets with these credentials (storing anyway)"
@@ -245,46 +284,57 @@ cmd_alias_list() {
   (( found )) || printf 'No aliases stored in %s\n' "$STORE"
 }
 
-if [[ "${1:-}" == "alias" ]]; then
-  sub="${2:-}"
-  shift 2 2>/dev/null || shift $# 
+alias_main() {
+  local sub="${1:-}"
+  (( $# )) && shift
   case "$sub" in
-    set)
-      [[ $# -ge 2 ]] || die "usage: mc alias set NAME URL [ACCESSKEY [SECRETKEY]]"
-      for arg in "$@"; do
-        case "$arg" in
-          --api*|--path*)
-            die "--api and --path are not supported: MC_HOST_ carries only a URL" ;;
-        esac
-      done
+    set|s)
+      [[ $# -ge 2 && $# -le 4 ]] || die "usage: mc alias set NAME URL [ACCESSKEY [SECRETKEY]]"
       cmd_alias_set "$@" ;;
     remove|rm)
-      [[ $# -ge 1 ]] || die "usage: mc alias remove NAME"
+      [[ $# -eq 1 ]] || die "usage: mc alias remove NAME"
       cmd_alias_remove "$1" ;;
     list|ls)
       cmd_alias_list ;;
     *)
-      die "unsupported: 'mc alias ${sub:-}'. sealedmc handles set, remove and list." ;;
+      die "unsupported: 'mc alias ${sub}'. sealedmc handles set, remove and list." ;;
   esac
-  exit 0
-fi
+}
+
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
 
 if [[ "${1:-}" == "--sealedmc-version" ]]; then
   printf 'sealedmc %s (wrapping %s)\n' "$VERSION" "$MC_REAL"
   exit 0
 fi
 
+split_args "$@"
+
+if [[ "${POSITIONAL[0]:-}" == "alias" ]]; then
+  for f in ${MC_FLAGS[@]+"${MC_FLAGS[@]}"}; do
+    case "$f" in
+      --api*|--path*)
+        die "--api and --path are not supported: MC_HOST_ carries only a URL" ;;
+      -h|--help)
+        exec "$MC_REAL" alias "${POSITIONAL[@]:1}" --help ;;
+    esac
+  done
+  alias_main "${POSITIONAL[@]:1}"
+  exit $?
+fi
+
+# "mc config host add" is the legacy spelling of "mc alias set" and would
+# write plaintext credentials.
+if [[ "${POSITIONAL[0]:-}" == "config" && "${POSITIONAL[1]:-}" == "host" ]]; then
+  die "'mc config host' is not supported; use 'mc alias set|list|remove'"
+fi
+
 # ---------------------------------------------------------------------------
 # Any other command: export credentials for every alias it references
 # ---------------------------------------------------------------------------
-after_dd=0
-for arg in "$@"; do
-  if (( ! after_dd )); then
-    case "$arg" in
-      --) after_dd=1; continue ;;
-      -*) continue ;;
-    esac
-  fi
+for arg in ${POSITIONAL[@]+"${POSITIONAL[@]}"}; do
   candidate="${arg%%/*}"
   valid_alias "$candidate" || continue
   [[ -r "$(store_path "$candidate")" ]] || continue
