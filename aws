@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+#
+# s3seal: aws shim. Linked as ~/.local/bin/aws by "s3seal enable aws".
+# Commands that write or read keys are handled here; every other command runs
+# the real AWS CLI unchanged.
+set -euo pipefail
+
+_self="$0"
+while [[ -L "$_self" ]]; do
+  _t="$(readlink "$_self")"
+  [[ "$_t" == /* ]] && _self="$_t" || _self="$(dirname "$_self")/$_t"
+done
+S3SEAL_HOME="$(cd "$(dirname "$_self")" && pwd)"
+
+# shellcheck source=lib/common.sh
+. "$S3SEAL_HOME/lib/common.sh"
+# shellcheck source=lib/ini.sh
+. "$S3SEAL_HOME/lib/ini.sh"
+# shellcheck source=lib/aws.sh
+. "$S3SEAL_HOME/lib/aws.sh"
+
+aws_shim "$@"

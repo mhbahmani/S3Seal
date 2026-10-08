@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+#
+# s3seal: turn sealing on or off for a tool, and show its state.
+#
+#   s3seal enable aws
+#   s3seal disable aws [--yes]
+#   s3seal status
+#
+# "credential-process" is called by the AWS CLI, not by users.
+set -euo pipefail
+
+VERSION="1.1.0"
+
+_self="$0"
+while [[ -L "$_self" ]]; do
+  _t="$(readlink "$_self")"
+  [[ "$_t" == /* ]] && _self="$_t" || _self="$(dirname "$_self")/$_t"
+done
+S3SEAL_HOME="$(cd "$(dirname "$_self")" && pwd)"
+
+# shellcheck source=lib/common.sh
+. "$S3SEAL_HOME/lib/common.sh"
+# shellcheck source=lib/ini.sh
+. "$S3SEAL_HOME/lib/ini.sh"
+# shellcheck source=lib/aws.sh
+. "$S3SEAL_HOME/lib/aws.sh"
+
+BIN_DIR="${S3SEAL_INSTALL_DIR:-$HOME/.local/bin}"
+
+bin_path() { printf '%s/%s' "$BIN_DIR" "$1"; }
+
+# Link ~/.local/bin/NAME to our entry point, unless something else is there.
+link_entry() {
+  local target; target="$(bin_path "$1")"
+  if [[ -L "$target" && "$(readlink "$target")" == "$S3SEAL_HOME/$1" ]]; then return 0; fi
+  [[ ! -e "$target" && ! -L "$target" ]] \
+    || die "$target exists and is not a s3seal link; move it aside first"
+  mkdir -p "$BIN_DIR"
+  ln -s "$S3SEAL_HOME/$1" "$target"
+}
+
+unlink_entry() {
+  local target; target="$(bin_path "$1")"
+  if [[ -L "$target" && "$(readlink "$target")" == "$S3SEAL_HOME/$1" ]]; then rm -f "$target"; fi
+}
+
+cmd_enable_aws() {
+  find_real aws >/dev/null || die "the AWS CLI is not installed or not on PATH"
+  aws_enable
+  link_entry aws
+  if [[ "$(command -v aws 2>/dev/null || true)" != "$(bin_path aws)" ]]; then
+    warn "'aws' does not resolve to the sealed shim yet: put $BIN_DIR before the AWS CLI's directory on PATH"
+  fi
+  printf 'aws is sealed. Keys entered with "aws configure" are stored encrypted.\n'
+}
+
+cmd_disable_aws() {
+  local flag="${1-}" answer=''
+  if [[ "$flag" != --yes ]]; then
+    have_tty || die "refusing to write plaintext keys without a terminal; pass --yes"
+    prompt_tty answer "This writes every sealed AWS key back to $AWS_CREDS in plaintext. Type 'yes' to continue: "
+    [[ "$answer" == yes ]] || die "aborted; nothing changed"
+  fi
+  aws_disable
+  unlink_entry aws
+  printf 'aws is no longer sealed.\n'
+}
+
+cmd_status() {
+  local p
+  printf 'aws:\n'
+  if [[ -L "$(bin_path aws)" && "$(readlink "$(bin_path aws)")" == "$S3SEAL_HOME/aws" ]]; then
+    printf '  shim:       on\n'
+  else
+    printf '  shim:       off\n'
+  fi
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && printf '  sealed:     %s\n' "$p"
+  done <<< "$(aws_sealed_profiles)"
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && printf '  PLAINTEXT:  %s (run: s3seal enable aws)\n' "$p"
+  done <<< "$(aws_plaintext_profiles)"
+}
+
+usage() {
+  cat <<EOF
+usage:
+  s3seal enable aws
+  s3seal disable aws [--yes]
+  s3seal status
+  s3seal --version
+EOF
+}
+
+case "${1-}" in
+  enable)
+    [[ "${2-}" == aws ]] || die "only 'aws' can be enabled so far"
+    cmd_enable_aws ;;
+  disable)
+    [[ "${2-}" == aws ]] || die "only 'aws' can be disabled so far"
+    cmd_disable_aws "${3-}" ;;
+  status) cmd_status ;;
+  credential-process)
+    [[ "${2-}" == aws ]] || die "unknown credential source '${2-}'"
+    aws_credential_process "${3-}" ;;
+  -h|--help|help) usage ;;
+  --version|version) printf 's3seal %s\n' "$VERSION" ;;
+  "") usage; exit 1 ;;
+  *) die "unknown command '$1'; see s3seal --help" ;;
+esac
