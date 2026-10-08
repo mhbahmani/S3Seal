@@ -396,7 +396,8 @@ if [[ -z "${S3SEAL_UPGRADE:-}" && ! -s "$CONFIG_DIR/recipient" && -z "${S3SEAL_G
   if (( INTERACTIVE )); then
     info ""
     rcpt=''
-    read -r -p "GPG key for encrypting credentials (email or key id, Enter to set later): " rcpt < /dev/tty || true
+    read -rs -p "GPG key for encrypting credentials (email or key id, Enter to set later): " rcpt < /dev/tty || true
+    echo > /dev/tty
     if [[ -n "$rcpt" ]]; then
       mkdir -p "$CONFIG_DIR"
       printf '%s\n' "$rcpt" > "$CONFIG_DIR/recipient"
