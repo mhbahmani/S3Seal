@@ -241,7 +241,9 @@ for arg in "$@"; do
   [[ -r "$(store_path "$candidate")" ]] || continue
   var="MC_HOST_$candidate"
   [[ -n "${!var:-}" ]] && continue
-  export "$var=$(decrypt_alias "$candidate")"
+  # Assigned separately: "export x=$(...)" would hide a decryption failure.
+  value="$(decrypt_alias "$candidate")"
+  export "$var=$value"
 done
 
 exec "$MC_REAL" "$@"
