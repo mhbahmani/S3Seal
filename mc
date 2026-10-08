@@ -183,6 +183,53 @@ prompt_tty() {
   printf -v "$varname" '%s' "$value"
 }
 
+# Extract a string field from one line of mc's JSON output, undoing the JSON
+# escapes Go produces (\" \\ \/ \uXXXX for ASCII, and the control escapes).
+json_field() {
+  local line="$1" key="$2" re raw out='' i c hex
+  re="\"$key\":\"(([^\"\\\\]|\\\\.)*)\""
+  [[ "$line" =~ $re ]] || return 0
+  raw="${BASH_REMATCH[1]}"
+  i=0
+  while (( i < ${#raw} )); do
+    c="${raw:i:1}"
+    if [[ "$c" == "\\" ]]; then
+      c="${raw:i+1:1}"
+      case "$c" in
+        u)
+          hex="${raw:i+2:4}"
+          printf -v c '%b' "\\x${hex:2:2}"
+          i=$((i + 6)); out+="$c"; continue ;;
+        n) c=$'\n' ;;
+        t) c=$'\t' ;;
+        r) c=$'\r' ;;
+        b) c=$'\b' ;;
+        f) c=$'\f' ;;
+      esac
+      out+="$c"; i=$((i + 2))
+    else
+      out+="$c"; i=$((i + 1))
+    fi
+  done
+  printf '%s' "$out"
+}
+
+# Aliases mc itself still holds with a real secret key. The public "play"
+# demo credentials and the placeholder entries mc writes by default are
+# ignored. Prints one JSON line per alias.
+plaintext_aliases() {
+  local line name sk
+  while IFS= read -r line; do
+    [[ "$line" == *'"status":"success"'* ]] || continue
+    [[ "$line" == *'"src":"env"'* ]] && continue
+    name="$(json_field "$line" alias)"
+    sk="$(json_field "$line" secretKey)"
+    [[ -n "$sk" && "$sk" != "YOUR-SECRET-KEY-HERE" ]] || continue
+    [[ "$name" == "play" && "$(json_field "$line" accessKey)" == "Q3AM3UQ867SPQQA43P2F" ]] && continue
+    printf '%s\n' "$line"
+  done < <("$MC_REAL" ${MC_FLAGS[@]+"${MC_FLAGS[@]}"} alias list --json 2>/dev/null || true)
+}
+
 # ---------------------------------------------------------------------------
 # Global flag handling
 #
@@ -269,9 +316,9 @@ cmd_alias_remove() {
 }
 
 cmd_alias_list() {
-  shopt -s nullglob
   local f n url found=0
   for f in "$STORE"/*.url.asc; do
+    [[ -e "$f" ]] || continue
     found=1
     n="${f##*/}"; n="${n%.url.asc}"
     if [[ -n "${SEALEDMC_LIST_ENDPOINTS:-}" ]]; then
@@ -282,6 +329,68 @@ cmd_alias_list() {
     fi
   done
   (( found )) || printf 'No aliases stored in %s\n' "$STORE"
+
+  local leftover names=''
+  leftover="$(plaintext_aliases)"
+  if [[ -n "$leftover" ]]; then
+    while IFS= read -r f; do
+      names+=" $(json_field "$f" alias)"
+    done <<< "$leftover"
+    warn "warning: mc's own config still holds plaintext credentials for:$names"
+    warn "run 'mc alias migrate' to encrypt them and remove the plaintext copies"
+  fi
+}
+
+# Move aliases out of mc's config.json into the encrypted store. With names,
+# only those aliases are migrated.
+cmd_alias_migrate() {
+  local rcpt line name url ak sk api path scheme host
+  local migrated=0 skipped=0 wanted=" $* "
+  rcpt="$(recipient)"
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    name="$(json_field "$line" alias)"
+    [[ $# -eq 0 || "$wanted" == *" $name "* ]] || continue
+
+    url="$(json_field "$line" URL)"
+    ak="$(json_field "$line" accessKey)"
+    sk="$(json_field "$line" secretKey)"
+    api="$(json_field "$line" api)"
+    path="$(json_field "$line" path)"
+
+    if ! valid_alias "$name"; then
+      warn "skipping '$name': not a valid shell identifier (re-add it under a name like ${name//[^A-Za-z0-9_]/_})"
+      skipped=$((skipped + 1)); continue
+    fi
+    if [[ -n "$api" && "$api" != [Ss]3[Vv]4 ]] || [[ -n "$path" && "$path" != auto ]]; then
+      warn "skipping '$name': uses api=$api path=$path, which MC_HOST_ cannot express"
+      skipped=$((skipped + 1)); continue
+    fi
+    if [[ ! "$url" =~ ^https?://[^/@]+/?$ ]]; then
+      warn "skipping '$name': url '$url' has a path"
+      skipped=$((skipped + 1)); continue
+    fi
+    if [[ "$ak" == *[:[:space:]]* || "$sk" == *[:[:space:]]* ]]; then
+      warn "skipping '$name': its keys contain ':' or whitespace, which MC_HOST_ cannot carry"
+      skipped=$((skipped + 1)); continue
+    fi
+    if [[ -e "$(store_path "$name")" ]]; then
+      warn "skipping '$name': an encrypted alias with that name already exists"
+      skipped=$((skipped + 1)); continue
+    fi
+
+    scheme="${url%%://*}"
+    host="${url#*://}"; host="${host%%/*}"
+    encrypt_to_store "$name" "$scheme://$ak:$sk@$host" "$rcpt"
+    "$MC_REAL" ${MC_FLAGS[@]+"${MC_FLAGS[@]}"} alias remove "$name" >/dev/null \
+      || die "stored '$name' encrypted, but could not remove it from mc's config; remove it with: $MC_REAL alias remove $name"
+    printf 'Migrated alias %s -> %s://%s (plaintext copy removed)\n' "$name" "$scheme" "$host"
+    migrated=$((migrated + 1))
+  done < <(plaintext_aliases)
+
+  printf '%d migrated, %d skipped\n' "$migrated" "$skipped"
+  (( skipped == 0 ))
 }
 
 alias_main() {
@@ -296,8 +405,10 @@ alias_main() {
       cmd_alias_remove "$1" ;;
     list|ls)
       cmd_alias_list ;;
+    migrate)
+      cmd_alias_migrate "$@" ;;
     *)
-      die "unsupported: 'mc alias ${sub}'. sealedmc handles set, remove and list." ;;
+      die "unsupported: 'mc alias ${sub}'. sealedmc handles set, remove, list and migrate." ;;
   esac
 }
 
