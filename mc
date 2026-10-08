@@ -8,11 +8,11 @@
 # process. They are never written to disk unencrypted, never passed in
 # argv, and never stored in shell history.
 #
-# https://github.com/YOUR-GITHUB-USER/sealedmc
+# https://github.com/mhbahmani/sealedmc
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 
 CONFIG_DIR="${SEALEDMC_CONFIG_DIR:-$HOME/.config/sealedmc}"
 STORE="$CONFIG_DIR/aliases"
