@@ -2,15 +2,15 @@
 #
 # sealedmc installer
 #
-#   curl -fsSL https://raw.githubusercontent.com/YOUR-GITHUB-USER/sealedmc/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/mhbahmani/sealedmc/master/install.sh | bash
 #
 # Installs the sealedmc wrapper as ~/.local/bin/mc. The wrapper takes over
 # the "mc" name, so the real MinIO client must not be on PATH.
 
 set -euo pipefail
 
-REPO="${SEALEDMC_REPO:-YOUR-GITHUB-USER/sealedmc}"
-REF="${SEALEDMC_REF:-main}"
+REPO="${SEALEDMC_REPO:-mhbahmani/sealedmc}"
+REF="${SEALEDMC_REF:-master}"
 RAW_URL="https://raw.githubusercontent.com/$REPO/$REF/mc"
 
 INSTALL_DIR="${SEALEDMC_INSTALL_DIR:-$HOME/.local/bin}"

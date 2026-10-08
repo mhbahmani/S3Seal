@@ -46,7 +46,7 @@ mc cp prod/bucket/x dev/bucket/     ->  decrypts "prod" and "dev", exports both,
 ## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR-GITHUB-USER/sealedmc/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mhbahmani/sealedmc/master/install.sh | bash
 ```
 
 The wrapper installs to `~/.local/bin/mc`.
