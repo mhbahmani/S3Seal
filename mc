@@ -98,18 +98,16 @@ Set SEALEDMC_GPG_RECIPIENT, or write a key id / email to $RECIPIENT_FILE"
   fi
 }
 
-# Percent-encode everything outside the RFC 3986 unreserved set. MinIO keys
-# are ASCII, so byte-wise encoding is correct here.
-urlencode() {
-  local s="$1" i c out=''
-  for (( i = 0; i < ${#s}; i++ )); do
-    c="${s:i:1}"
-    case "$c" in
-      [A-Za-z0-9._~-]) out+="$c" ;;
-      *) printf -v c '%%%02X' "'$c"; out+="$c" ;;
-    esac
-  done
-  printf '%s' "$out"
+# mc splits MC_HOST_<alias> with the regexes
+#   ^(https?://)(.*?):(.*?):(.*)@(.*?)$   (access key, secret, session token)
+#   ^(https?://)(.*?):(.*)@(.*?)$         (access key, secret)
+# and does not percent-decode the captures. Keys therefore have to be stored
+# verbatim, and a ":" in either key would be misparsed.
+check_key() {
+  local what="$1" value="$2"
+  [[ -n "$value" ]] || die "$what is empty"
+  [[ "$value" != *:* ]] || die "$what contains ':', which mc cannot read from MC_HOST_"
+  [[ "$value" != *[[:space:]]* ]] || die "$what contains whitespace"
 }
 
 decrypt_alias() {
@@ -142,18 +140,19 @@ cmd_alias_set() {
 
   valid_alias "$name" || die "alias '$name' cannot be used.
 Names must match [A-Za-z_][A-Za-z0-9_]* because mc reads them as MC_HOST_$name."
-  [[ "$url" =~ ^https?://[^/]+/?$ ]] \
-    || die "url must be a bare endpoint like https://minio.example.com (no path)"
+  [[ "$url" =~ ^https?://[^/@]+/?$ ]] \
+    || die "url must be a bare endpoint like https://minio.example.com (no path, no credentials)"
 
   [[ -n "$ak" ]] || prompt_tty ak 'Access key: '
   [[ -n "$sk" ]] || prompt_tty sk 'Secret key: ' silent
-  [[ -n "$ak" && -n "$sk" ]] || die "access key and secret key are both required"
+  check_key "access key" "$ak"
+  check_key "secret key" "$sk"
 
   local scheme host full
   scheme="${url%%://*}"
   host="${url#*://}"
   host="${host%%/*}"
-  full="$scheme://$(urlencode "$ak"):$(urlencode "$sk")@$host"
+  full="$scheme://$ak:$sk@$host"
 
   if [[ -z "${SEALEDMC_NO_VERIFY:-}" ]]; then
     if MC_HOST_sealedmcprobe="$full" "$MC_REAL" ls sealedmcprobe/ >/dev/null 2>&1; then
@@ -186,14 +185,13 @@ cmd_alias_remove() {
 
 cmd_alias_list() {
   shopt -s nullglob
-  local f n url host found=0
+  local f n url found=0
   for f in "$STORE"/*.url.asc; do
     found=1
     n="${f##*/}"; n="${n%.url.asc}"
     if [[ -n "${SEALEDMC_LIST_ENDPOINTS:-}" ]]; then
       url="$(decrypt_alias "$n")"
-      host="${url#*@}"
-      printf '%-20s %s://%s\n' "$n" "${url%%://*}" "$host"
+      printf '%-20s %s://%s\n' "$n" "${url%%://*}" "${url##*@}"
     else
       printf '%s\n' "$n"
     fi
