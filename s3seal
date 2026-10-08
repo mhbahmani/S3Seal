@@ -82,12 +82,52 @@ cmd_status() {
   done <<< "$(aws_plaintext_profiles)"
 }
 
+cmd_upgrade() {
+  local check=0 force=0 repo=mhbahmani/s3seal ref=master latest tmp a
+  for a in "$@"; do
+    case "$a" in
+      --check) check=1 ;;
+      --force) force=1 ;;
+      *) die "unknown option '$a' for upgrade" ;;
+    esac
+  done
+  [[ -f "$S3SEAL_HOME/source" ]] \
+    || die "upgrade works on an installed copy, not on a git checkout (no $S3SEAL_HOME/source)"
+  read -r repo ref < "$S3SEAL_HOME/source" || true
+  command -v curl >/dev/null 2>&1 || die "curl is required to upgrade"
+
+  tmp="$(mktemp -d)"
+  # Expanded now: a local variable is gone by the time the EXIT trap runs.
+  # shellcheck disable=SC2064  # expanded now on purpose: the local is gone at exit
+  trap "rm -rf '$tmp'" EXIT
+  curl -fsSL "https://raw.githubusercontent.com/$repo/$ref/s3seal" -o "$tmp/s3seal" \
+    || die "cannot fetch $repo@$ref"
+  latest="$(sed -n 's/^VERSION="\(.*\)"$/\1/p' "$tmp/s3seal" | head -n1)"
+
+  if (( check )); then
+    printf 'installed %s, available %s (%s@%s)\n' "$VERSION" "$latest" "$repo" "$ref"
+    exit 0
+  fi
+  if [[ "$latest" == "$VERSION" ]] && (( ! force )); then
+    printf 's3seal %s is already the latest version. Nothing to do.\n' "$VERSION"
+    exit 0
+  fi
+
+  # install.sh checks every file it installs against its own checksum table,
+  # so the upgrade is verified the same way as a fresh install.
+  curl -fsSL "https://raw.githubusercontent.com/$repo/$ref/install.sh" -o "$tmp/install.sh" \
+    || die "cannot fetch the installer from $repo@$ref"
+  S3SEAL_REPO="$repo" S3SEAL_REF="$ref" S3SEAL_SHARE_DIR="$S3SEAL_HOME" \
+    S3SEAL_INSTALL_DIR="$BIN_DIR" S3SEAL_CONFIG_DIR="$CONFIG_DIR" bash "$tmp/install.sh"
+}
+
 usage() {
   cat <<EOF
 usage:
   s3seal enable aws
   s3seal disable aws [--yes]
   s3seal status
+  s3seal upgrade [--check] [--force]
   s3seal --version
 EOF
 }
@@ -100,6 +140,7 @@ case "${1-}" in
     [[ "${2-}" == aws ]] || die "only 'aws' can be disabled so far"
     cmd_disable_aws "${3-}" ;;
   status) cmd_status ;;
+  upgrade) shift; cmd_upgrade "$@" ;;
   credential-process)
     [[ "${2-}" == aws ]] || die "unknown credential source '${2-}'"
     aws_credential_process "${3-}" ;;

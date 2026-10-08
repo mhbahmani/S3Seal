@@ -30,7 +30,7 @@ ENTRIES="mc aws s3seal"
 CHECKSUMS="$(cat <<'SUMS'
 89f121fafbf2c57523b0279693355ed185edc6c766cdb07e28f2eb32482dd218  mc
 0e3b08bebc26b035f7a4a9e8ee3c509f08001f5f3f2b73d02d980102e9af5297  aws
-e3ba7bd7f5ac611445e32854617c9faeae01fbf50723c6407f69919878733d0b  s3seal
+da7fe28e0595c0eefa74b7adc02d52d304a6a0b6f70beddf863238239aaf1431  s3seal
 ffd2d7d82692f5f4f5e6fe7f0f4b145fc948796ff8165f37695d43ae01fcbb35  lib/common.sh
 902dc7031554f646477c24687e7cd87d70e2820b9a9d087641da3e9b526339c5  lib/ini.sh
 c44c47d1080f58d90ae2b5c70676f0089882260367acbd0b1ff3d085eecffe47  lib/aws.sh
@@ -161,20 +161,58 @@ Put it at $LIBEXEC_DIR/mc, or set MC_BIN, then re-run. To download it:
 fi
 ok "found the real MinIO client at $real_mc"
 
+# --- compare with what is already installed ----------------------------------
+version_of() { sed -n 's/^VERSION="\(.*\)"$/\1/p' "$1" 2>/dev/null | head -n1; }
+
+installed_version=""
+[[ -f "$SHARE_DIR/s3seal" ]] && installed_version="$(version_of "$SHARE_DIR/s3seal")"
+new_version="$(version_of "$stage/s3seal")"
+
+changed=()
+for f in $FILES; do
+  cmp -s "$stage/$f" "$SHARE_DIR/$f" || changed+=("$f")
+done
+
+if [[ -z "$installed_version" ]]; then
+  state=fresh
+elif (( ${#changed[@]} == 0 )); then
+  state=same
+elif [[ "$installed_version" == "$new_version" ]]; then
+  state=refresh
+else
+  state=upgrade
+fi
+
+case "$state" in
+  fresh)   info "Installing s3seal $new_version." ;;
+  same)    ok "s3seal $new_version is already installed and up to date. Nothing to copy." ;;
+  refresh) info "s3seal $new_version is already installed. Refreshing ${#changed[@]} changed file(s)." ;;
+  upgrade) info "Upgrading s3seal $installed_version -> $new_version." ;;
+esac
+
 # --- install ----------------------------------------------------------------
 mkdir -p "$SHARE_DIR/lib" "$INSTALL_DIR"
-for f in $FILES; do
-  case "$f" in
-    lib/*) mode=0644 ;;
-    *) mode=0755 ;;
-  esac
-  install -m "$mode" "$stage/$f" "$SHARE_DIR/$f"
-done
-ok "installed s3seal into $SHARE_DIR"
+if [[ "$state" != same ]]; then
+  for f in "${changed[@]}"; do
+    case "$f" in
+      lib/*) mode=0644 ;;
+      *) mode=0755 ;;
+    esac
+    # Write beside the target and rename over it: a running s3seal keeps its old
+    # file, so an upgrade started from s3seal itself cannot corrupt the process.
+    install -m "$mode" "$stage/$f" "$SHARE_DIR/$f.new"
+    mv -f "$SHARE_DIR/$f.new" "$SHARE_DIR/$f"
+  done
+  ok "installed s3seal $new_version into $SHARE_DIR"
+fi
+printf '%s %s\n' "$REPO" "$REF" > "$SHARE_DIR/source"
 
 # Replaces a symlink or an older regular-file wrapper; refuses anything else.
 link_entry() {
   local target="$INSTALL_DIR/$1"
+  if [[ -L "$target" && "$(readlink "$target")" == "$SHARE_DIR/$1" ]]; then
+    return 0
+  fi
   if [[ -e "$target" || -L "$target" ]]; then
     if [[ -L "$target" ]] || is_wrapper "$target"; then
       rm -f "$target"
@@ -183,10 +221,10 @@ link_entry() {
     fi
   fi
   ln -s "$SHARE_DIR/$1" "$target"
+  ok "linked $1 into $INSTALL_DIR"
 }
 link_entry mc
 link_entry s3seal
-ok "linked mc and s3seal into $INSTALL_DIR"
 
 mkdir -p "$CONFIG_DIR"
 chmod 700 "$CONFIG_DIR"
@@ -206,8 +244,13 @@ if [[ ! -s "$CONFIG_DIR/recipient" && -z "${S3SEAL_GPG_RECIPIENT:-}" ]]; then
   info "    echo 'you@example.com' > $CONFIG_DIR/recipient   (or gpg --full-generate-key first)"
 fi
 
-info ""
-info "Next steps:"
-info "  1. mc alias set prod https://minio.example.com      # stored encrypted"
-info "  2. s3seal enable aws                                 # seal existing AWS profiles, then use aws as before"
-info "  3. s3seal status                                     # shows what is sealed"
+if [[ "$state" == fresh ]]; then
+  info ""
+  info "Next steps:"
+  info "  1. mc alias set prod https://minio.example.com      # stored encrypted"
+  info "  2. s3seal enable aws                                 # seal existing AWS profiles, then use aws as before"
+  info "  3. s3seal status                                     # shows what is sealed"
+else
+  info ""
+  info "Run 's3seal status' to see what is sealed. Upgrade later with 's3seal upgrade'."
+fi
