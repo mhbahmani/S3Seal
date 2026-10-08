@@ -126,6 +126,49 @@ find_official() {
 
 version_of() { sed -n 's/^VERSION="\(.*\)"$/\1/p' "$1" 2>/dev/null | head -n1; }
 
+client_label() {
+  case "$1" in
+    mc) printf 'mc    the MinIO client' ;;
+    aws) printf 'aws   the AWS CLI' ;;
+  esac
+}
+
+# Checkbox menu over the names given. Up and down move, space toggles, Enter
+# confirms. All start checked. Prints the chosen names on stdout.
+checkbox_menu() {
+  local -a names=("$@") checked=()
+  local n=${#names[@]} i cur=0 key rest first=1 mark ptr
+  for ((i = 0; i < n; i++)); do checked[i]=1; done
+  printf 'Select the clients to protect (arrows move, space toggles, Enter confirms):\n' >&2
+  while true; do
+    if (( ! first )); then printf '\033[%dA' "$n" >&2; fi
+    first=0
+    for ((i = 0; i < n; i++)); do
+      mark=' '; ptr=' '
+      if (( checked[i] )); then mark='x'; fi
+      if (( i == cur )); then ptr='>'; fi
+      printf '\033[2K %s [%s] %s\n' "$ptr" "$mark" "$(client_label "${names[i]}")" >&2
+    done
+    IFS= read -rsn1 key < /dev/tty || break
+    if [[ "$key" == $'\e' ]]; then
+      IFS= read -rsn2 rest < /dev/tty || true
+      case "$rest" in
+        '[A') if (( cur > 0 )); then cur=$((cur - 1)); else cur=$((n - 1)); fi ;;
+        '[B') cur=$(((cur + 1) % n)) ;;
+      esac
+    elif [[ "$key" == ' ' ]]; then
+      checked[cur]=$((1 - checked[cur]))
+    elif [[ -z "$key" ]]; then
+      break
+    fi
+  done
+  local out=''
+  for ((i = 0; i < n; i++)); do
+    if (( checked[i] )); then out+="${names[i]} "; fi
+  done
+  printf '%s' "$out"
+}
+
 # --- questions ---------------------------------------------------------------
 printf '\n%ss3seal installer%s\n\n' "$B" "$R"
 command -v gpg >/dev/null 2>&1 || fail "gpg is required"
@@ -133,12 +176,22 @@ command -v curl >/dev/null 2>&1 || fail "curl is required"
 
 SEAL_MC=0 SEAL_AWS=0
 if [[ -z "${S3SEAL_UPGRADE:-}" ]]; then
-  info "s3seal keeps the keys of these clients encrypted with GPG:"
-  info "  mc    the MinIO client"
-  info "  aws   the AWS CLI"
-  info ""
-  if ask "Protect mc? [Y/n]:" y; then SEAL_MC=1; fi
-  if ask "Protect aws? [Y/n]:" y; then SEAL_AWS=1; fi
+  # Only clients that are installed here can be protected.
+  PRESENT=()
+  if [[ -n "$(find_official "mc mcli" 2>/dev/null || true)" ]]; then PRESENT+=(mc); fi
+  if [[ -n "$(find_official "aws" 2>/dev/null || true)" ]]; then PRESENT+=(aws); fi
+
+  SELECTED=""
+  if (( ${#PRESENT[@]} == 0 )); then
+    info "No supported client was found on PATH (mc, aws). Install one and re-run the installer."
+  elif (( INTERACTIVE )); then
+    info ""
+    SELECTED="$(checkbox_menu "${PRESENT[@]}")"
+  else
+    SELECTED="${PRESENT[*]}"
+  fi
+  case " $SELECTED " in *" mc "*) SEAL_MC=1 ;; esac
+  case " $SELECTED " in *" aws "*) SEAL_AWS=1 ;; esac
   info ""
 fi
 

@@ -692,7 +692,7 @@ test_install_asks_before_moving_official_client() {
   install_env
   unset S3SEAL_YES
   cp "$FAKE_MC" "$T/bin/mc"
-  OUT="$(printf 'Protect mc?\t\nProtect aws?\tn\nInstall s3seal to\t\nPut the commands in\t\nMove it out of PATH\ty\nKeep it in\t%s\n' "$T/libexec" \
+  OUT="$(printf 'Select the clients\t\nInstall s3seal to\t\nPut the commands in\t\nMove it out of PATH\ty\nKeep it in\t%s\n' "$T/libexec" \
     | python3 "$ROOT/tests/pty_drive.py" "$TEST_BASH" "$ROOT/install.sh")"
   assert_out "moved to $T/libexec/mc"
   assert_file "$T/libexec/mc"
@@ -714,8 +714,8 @@ test_install_reports_missing_clients() {
   install_env
   OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
-  assert_out "mc: no official client found on PATH"
-  assert_out "s3seal enable mc"
+  assert_out "No supported client was found on PATH"
+  assert_out "Install one and re-run"
 }
 
 test_install_ignores_midnight_commander() {
@@ -723,8 +723,8 @@ test_install_ignores_midnight_commander() {
   cp "$MIDNIGHT" "$T/bin/mc"
   OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
-  assert_out "not the MinIO client (Midnight Commander?); ignoring it"
-  assert_out "mc: no official client found on PATH"
+  assert_out "No supported client was found on PATH"
+  assert_not_out "Protect"
 }
 
 test_install_twice_is_idempotent() {
