@@ -137,8 +137,8 @@ if [[ -z "${S3SEAL_UPGRADE:-}" ]]; then
   info "  mc    the MinIO client"
   info "  aws   the AWS CLI"
   info ""
-  ask "Protect mc? [Y/n]:" y && SEAL_MC=1 || true
-  ask "Protect aws? [Y/n]:" y && SEAL_AWS=1 || true
+  if ask "Protect mc? [Y/n]:" y; then SEAL_MC=1; fi
+  if ask "Protect aws? [Y/n]:" y; then SEAL_AWS=1; fi
   info ""
 fi
 
@@ -297,8 +297,8 @@ setup_client() {  # NAME CANDIDATES
 }
 
 if [[ -z "${S3SEAL_UPGRADE:-}" ]]; then
-  (( SEAL_MC )) && { info ""; setup_client mc "mc mcli"; } || true
-  (( SEAL_AWS )) && { info ""; setup_client aws "aws"; } || true
+  if (( SEAL_MC )); then info ""; setup_client mc "mc mcli"; fi
+  if (( SEAL_AWS )); then info ""; setup_client aws "aws"; fi
 fi
 
 # --- GPG recipient -----------------------------------------------------------

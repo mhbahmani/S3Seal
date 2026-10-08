@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck mc aws s3seal install.sh uninstall.sh scripts/update-checksum.sh tests/run.sh lib/*.sh
+      - run: shellcheck -x bin/* lib/*.sh install.sh uninstall.sh scripts/update-checksum.sh tests/run.sh
 
   test:
     strategy:
