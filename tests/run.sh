@@ -687,6 +687,22 @@ test_install_leaves_official_client_without_consent() {
   assert_file "$T/bin/mc"
 }
 
+test_install_explains_move_that_needs_root() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  install_env
+  unset S3SEAL_YES
+  cp "$FAKE_MC" "$T/bin/mc"
+  chmod 555 "$T/bin"
+  OUT="$(printf 'Select the clients\t\nInstall s3seal to\t\nPut the commands in\t\nMove it out of PATH\ty\nKeep it in\t%s\nRun the command above\t\n' "$T/libexec" \
+    | python3 "$ROOT/tests/pty_drive.py" "$TEST_BASH" "$ROOT/install.sh")"
+  chmod 755 "$T/bin"
+  assert_out "running as user: $(id -un)"
+  assert_out "$T/bin is not writable by $(id -un)"
+  assert_out "sudo mv $T/bin/mc $T/libexec/mc"
+  assert_file "$T/bin/mc"
+  [[ "$(cat "$S3SEAL_CONFIG_DIR/mc-path")" == "$T/bin/mc" ]] || fail "mc-path should keep the old location"
+}
+
 test_install_asks_before_moving_official_client() {
   command -v python3 >/dev/null 2>&1 || return 0
   install_env

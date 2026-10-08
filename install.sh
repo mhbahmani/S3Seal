@@ -312,6 +312,38 @@ link_command() {
 link_command s3seal
 ok "linked s3seal into $BIN_DIR"
 
+# Name of the user owning PATH (GNU and BSD stat differ).
+owner_of() { stat -c %U "$1" 2>/dev/null || stat -f %Su "$1"; }
+
+# Moves FROM to TO. On failure, explains which part of the permissions blocks
+# it, and prints the command that does it with sudo.
+move_client() {  # FROM TO
+  local from="$1" to="$2" src_dir dst_dir owner
+  src_dir="$(dirname "$from")"
+  dst_dir="$(dirname "$to")"
+  if mkdir -p "$dst_dir" 2>/dev/null && mv -f "$from" "$to" 2>/dev/null; then
+    ok "  moved to $to"
+    return 0
+  fi
+  owner="$(owner_of "$from")"
+  warn "  could not move $from to $to"
+  info "    running as user: $(id -un)"
+  if [[ ! -w "$src_dir" ]]; then
+    info "    $src_dir is not writable by $(id -un) (owned by $(owner_of "$src_dir"))"
+  fi
+  if ! mkdir -p "$dst_dir" 2>/dev/null; then
+    info "    $dst_dir cannot be created by $(id -un)"
+  elif [[ ! -w "$dst_dir" ]]; then
+    info "    $dst_dir is not writable by $(id -un)"
+  fi
+  if [[ "$owner" != "$(id -un)" ]]; then
+    info "    $from is owned by $owner"
+  fi
+  info "  Moving it needs root. Run this command yourself:"
+  info "      sudo mv $from $to"
+  return 1
+}
+
 # --- protected clients ------------------------------------------------------
 # Moves an official client out of PATH (with consent) and records where it is,
 # then lets "s3seal enable" take over the name.
@@ -330,13 +362,18 @@ setup_client() {  # NAME CANDIDATES
       if [[ -z "$LIBEXEC_DIR" ]]; then
         LIBEXEC_DIR="$(ask_dir "  Keep it in" "$HOME/.local/libexec")"
       fi
-      mkdir -p "$LIBEXEC_DIR"
       new="$LIBEXEC_DIR/$tool"
-      if mv -f "$found" "$new" 2>/dev/null; then
-        ok "  moved to $new"
+      if move_client "$found" "$new"; then
         found="$new"
-      else
-        warn "  could not move it (permission?). To do it yourself: sudo mv $found $new"
+      elif (( INTERACTIVE )); then
+        printf '  Run the command above in another terminal, then press Enter to continue.\n' >&2
+        read -r -p '  ' _ < /dev/tty || true
+        if [[ -f "$new" && ! -e "$found" ]]; then
+          ok "  moved to $new"
+          found="$new"
+        else
+          warn "  $found was not moved; continuing with its current location"
+        fi
       fi
     else
       info "  left in place; $BIN_DIR must come before its directory on PATH."
