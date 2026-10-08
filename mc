@@ -116,12 +116,39 @@ check_key() {
   [[ "$value" != *[[:space:]]* ]] || die "$what contains whitespace"
 }
 
+# gpg's own diagnostics are shown only when something goes wrong.
+run_gpg() {
+  local errf rc=0
+  errf="$(mktemp "${TMPDIR:-/tmp}/sealedmc.XXXXXX")"
+  gpg "$@" 2>"$errf" || rc=$?
+  if (( rc )) || [[ -n "${SEALEDMC_DEBUG:-}" ]]; then
+    sed 's/^/sealedmc: /' "$errf" >&2
+  fi
+  rm -f "$errf"
+  return "$rc"
+}
+
 decrypt_alias() {
   local a="$1" f
   f="$(store_path "$a")"
   [[ -r "$f" ]] || die "no stored credentials for alias '$a'"
-  gpg --quiet --batch --decrypt "$f" 2>/dev/null \
+  run_gpg --quiet --batch --decrypt "$f" \
     || die "GPG decryption failed for alias '$a'"
+}
+
+encrypt_to_store() {
+  local name="$1" full="$2" rcpt="$3" target tmp
+  target="$(store_path "$name")"
+  tmp="$target.tmp.$$"
+  (
+    umask 077
+    trap 'rm -f "$tmp"' EXIT
+    mkdir -p "$STORE"
+    printf '%s' "$full" \
+      | run_gpg --quiet --batch --yes --armor --encrypt \
+            --recipient "$rcpt" --output "$tmp" \
+      && mv -f "$tmp" "$target"
+  ) || die "GPG encryption failed for alias '$name'"
 }
 
 # Prompt on the controlling terminal rather than stdin, so that piping into
@@ -171,17 +198,7 @@ cmd_alias_set() {
     fi
   fi
 
-  local target tmp
-  target="$(store_path "$name")"
-  tmp="$target.tmp.$$"
-  (
-    umask 077
-    mkdir -p "$STORE"
-    printf '%s' "$full" \
-      | gpg --quiet --batch --yes --armor --encrypt \
-            --recipient "$rcpt" --output "$tmp"
-    mv -f "$tmp" "$target"
-  )
+  encrypt_to_store "$name" "$full" "$rcpt"
   printf 'Stored alias %s -> %s://%s (encrypted)\n' "$name" "$scheme" "$host"
 }
 
