@@ -310,6 +310,12 @@ if [[ "${1:-}" == "--sealedmc-version" ]]; then
   exit 0
 fi
 
+# Shell completion (complete -C mc mc) runs mc with COMP_LINE set. Never
+# decrypt there: a pinentry prompt on every <Tab> would be unusable.
+if [[ -n "${COMP_LINE:-}" ]]; then
+  exec "$MC_REAL" "$@"
+fi
+
 split_args "$@"
 
 if [[ "${POSITIONAL[0]:-}" == "alias" ]]; then
