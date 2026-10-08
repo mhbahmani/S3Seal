@@ -5,8 +5,6 @@
 
 set -euo pipefail
 
-INSTALL_DIR="${S3SEAL_INSTALL_DIR:-$HOME/.local/bin}"
-SHARE_DIR="${S3SEAL_SHARE_DIR:-$HOME/.local/share/s3seal}"
 CONFIG_DIR="${S3SEAL_CONFIG_DIR:-$HOME/.config/s3seal}"
 PURGE=0
 ASSUME_YES=0
@@ -20,22 +18,30 @@ for arg in "$@"; do
   esac
 done
 
-# Sealed AWS profiles need s3seal's credential_process; refuse to break them.
-sealed=0
-for f in "$CONFIG_DIR"/aws/*.secret.asc; do
-  [[ -e "$f" ]] && sealed=1
+# Sealed credentials need s3seal to read them; refuse to strand them.
+sealed=()
+for f in "$CONFIG_DIR"/aws/*.secret.asc "$CONFIG_DIR"/aliases/*.url.asc; do
+  [[ -e "$f" ]] && sealed+=("$f")
 done
-if (( sealed )); then
-  printf 'AWS profiles are still sealed. Run "s3seal disable aws" first, then re-run this.\n' >&2
+if (( ${#sealed[@]} )); then
+  printf 'Credentials are still sealed. Run "s3seal disable aws" and/or "s3seal disable mc" first, then re-run this.\n' >&2
   exit 1
 fi
 
+# Locate the installed copy from the s3seal link, if there is one.
+SHARE_DIR=""
+for dir in "${S3SEAL_INSTALL_DIR:-$HOME/.local/bin}" "$HOME/.local/bin"; do
+  if [[ -L "$dir/s3seal" ]]; then
+    SHARE_DIR="$(dirname "$(dirname "$(readlink "$dir/s3seal")")")"
+    break
+  fi
+done
+SHARE_DIR="${S3SEAL_SHARE_DIR:-${SHARE_DIR:-$HOME/.local/share/s3seal}}"
+BIN_DIR="${S3SEAL_INSTALL_DIR:-$HOME/.local/bin}"
+
 for name in mc aws s3seal; do
-  target="$INSTALL_DIR/$name"
-  if [[ -L "$target" && "$(readlink "$target")" == "$SHARE_DIR/$name" ]]; then
-    rm -f "$target"
-    printf 'Removed %s\n' "$target"
-  elif [[ -f "$target" ]] && grep -q '^# s3seal:' "$target" 2>/dev/null; then
+  target="$BIN_DIR/$name"
+  if [[ -L "$target" && "$(readlink "$target")" == "$SHARE_DIR/bin/$name" ]]; then
     rm -f "$target"
     printf 'Removed %s\n' "$target"
   fi
@@ -47,10 +53,7 @@ if [[ -d "$SHARE_DIR" ]]; then
 fi
 
 if [[ -r "$CONFIG_DIR/mc-path" ]]; then
-  real_mc="$(head -n1 "$CONFIG_DIR/mc-path")"
-  printf '\nThe real MinIO client is still at:\n    %s\n' "$real_mc"
-  printf 'Put it back on your PATH if you want to use it directly, e.g.:\n'
-  printf '    mv %s %s/mc\n' "$real_mc" "$INSTALL_DIR"
+  printf '\nThe official mc is still at %s; it was not removed.\n' "$(head -n1 "$CONFIG_DIR/mc-path")"
 fi
 
 if (( PURGE )); then

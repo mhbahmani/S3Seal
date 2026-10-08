@@ -637,55 +637,8 @@ test_aws_enable_without_cli_fails() {
 install_env() {
   mkdir -p "$T/bin"
   export PATH="$T/bin:$GPG_DIR:/usr/bin:/bin"
-  export S3SEAL_INSTALL_DIR="$HOME/.local/bin"
-  export S3SEAL_SHARE_DIR="$HOME/.local/share/s3seal"
-}
-
-test_install_from_checkout() {
-  install_env
-  cp "$MIDNIGHT" "$T/bin/mc"
-  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
-  assert_rc 0
-  assert_out "not the MinIO client (Midnight Commander?)"
-  assert_out "found the real MinIO client at $FAKE_MC"
-  assert_out "s3seal enable aws"
-  for f in bin/mc bin/aws bin/s3seal lib/common.sh lib/ini.sh lib/aws.sh lib/mc.sh; do
-    cmp -s "$ROOT/$f" "$HOME/.local/share/s3seal/$f" || fail "$f not installed"
-  done
-  [[ "$(readlink "$HOME/.local/bin/mc")" == "$HOME/.local/share/s3seal/bin/mc" ]] || fail "mc not linked"
-  [[ "$(readlink "$HOME/.local/bin/s3seal")" == "$HOME/.local/share/s3seal/bin/s3seal" ]] || fail "s3seal not linked"
-  assert_no_file "$HOME/.local/bin/aws"
-  [[ "$(cat "$S3SEAL_CONFIG_DIR/mc-path")" == "$FAKE_MC" ]] || fail "mc-path not recorded"
-}
-
-test_install_then_enable_aws_end_to_end() {
-  install_env
-  aws_env; seed_credentials
-  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" || fail "install failed: $OUT"
-  export PATH="$HOME/.local/bin:$PATH"
-  run_out "$HOME/.local/bin/s3seal" enable aws --yes
-  assert_rc 0
-  assert_out "Sealed AWS profile prod"
-  run_out "$HOME/.local/bin/s3seal" disable aws --yes
-  assert_rc 0
-}
-
-test_install_refuses_real_mc_on_path() {
-  install_env
-  cp "$FAKE_MC" "$T/bin/mc"
-  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
-  assert_rc 1
-  assert_out "the real mc binary is still on your PATH"
-  assert_no_file "$HOME/.local/bin/mc"
-}
-
-test_install_rejects_non_minio_binary() {
-  install_env
-  export MC_BIN="$MIDNIGHT"
-  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
-  assert_rc 1
-  assert_out "ignoring $MIDNIGHT: not the MinIO client"
-  assert_out "dl.min.io/client/mc/release/"
+  export S3SEAL_YES=1
+  unset S3SEAL_INSTALL_DIR S3SEAL_SHARE_DIR MC_BIN
 }
 
 # install.sh piped into bash downloads the files; a fake curl serves them from $1.
@@ -709,11 +662,87 @@ EOF2
   chmod +x "$T/bin/curl"
 }
 
+test_install_from_checkout() {
+  install_env
+  cp "$FAKE_MC" "$T/bin/mc"
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  assert_out "Copying s3seal from this checkout"
+  assert_out "mc: found the official client at $T/bin/mc"
+  assert_out "Done. Check the state with: s3seal status"
+  for f in bin/mc bin/aws bin/s3seal lib/common.sh lib/ini.sh lib/aws.sh lib/mc.sh; do
+    cmp -s "$ROOT/$f" "$HOME/.local/share/s3seal/$f" || fail "$f not installed"
+  done
+  [[ "$(readlink "$HOME/.local/bin/s3seal")" == "$HOME/.local/share/s3seal/bin/s3seal" ]] || fail "s3seal not linked"
+  [[ "$(cat "$S3SEAL_CONFIG_DIR/mc-path")" == "$T/bin/mc" ]] || fail "mc-path not recorded"
+  assert_file "$T/bin/mc"
+}
+
+test_install_leaves_official_client_without_consent() {
+  install_env
+  cp "$FAKE_MC" "$T/bin/mc"
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  assert_out "left in place"
+  assert_file "$T/bin/mc"
+}
+
+test_install_asks_before_moving_official_client() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  install_env
+  unset S3SEAL_YES
+  cp "$FAKE_MC" "$T/bin/mc"
+  OUT="$(printf 'Protect mc?\t\nProtect aws?\tn\nInstall s3seal to\t\nPut the commands in\t\nMove it out of PATH\ty\nKeep it in\t%s\n' "$T/libexec" \
+    | python3 "$ROOT/tests/pty_drive.py" "$TEST_BASH" "$ROOT/install.sh")"
+  assert_out "moved to $T/libexec/mc"
+  assert_file "$T/libexec/mc"
+  assert_no_file "$T/bin/mc"
+  [[ "$(cat "$S3SEAL_CONFIG_DIR/mc-path")" == "$T/libexec/mc" ]] || fail "mc-path not updated"
+}
+
+test_install_finds_only_present_clients() {
+  install_env
+  cp "$FAKE_MC" "$T/bin/mc"
+  export S3SEAL_YES=1
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  assert_out "found the official client"
+  assert_no_file "$S3SEAL_CONFIG_DIR/aws-path"
+}
+
+test_install_reports_missing_clients() {
+  install_env
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  assert_out "mc: no official client found on PATH"
+  assert_out "s3seal enable mc"
+}
+
+test_install_ignores_midnight_commander() {
+  install_env
+  cp "$MIDNIGHT" "$T/bin/mc"
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  assert_out "not the MinIO client (Midnight Commander?); ignoring it"
+  assert_out "mc: no official client found on PATH"
+}
+
+test_install_twice_is_idempotent() {
+  install_env
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0; assert_out "Installing s3seal 1.1.0"
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  assert_out "s3seal 1.1.0 is already installed and up to date"
+  assert_not_out "Installing s3seal"
+  [[ "$(readlink "$HOME/.local/bin/s3seal")" == "$HOME/.local/share/s3seal/bin/s3seal" ]] || fail "link lost"
+}
+
 test_install_verifies_download_checksum() {
   install_env
   fake_curl "$ROOT"
   OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
-  assert_rc 0; assert_out "verified s3seal"
+  assert_rc 0; assert_out "all files match their checksums"
   assert_file "$HOME/.local/share/s3seal/lib/aws.sh"
 
   rm -rf "$T/tampered"; mkdir -p "$T/tampered"
@@ -729,6 +758,49 @@ test_install_verifies_download_checksum() {
   assert_rc 0; assert_out "not verified"
 }
 
+test_install_then_enable_aws_end_to_end() {
+  install_env
+  aws_env; seed_credentials
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" || fail "install failed: $OUT"
+  run_out "$HOME/.local/share/s3seal/bin/s3seal" enable aws --yes
+  assert_rc 0
+  assert_out "Sealed AWS profile prod"
+  run_out "$HOME/.local/share/s3seal/bin/s3seal" disable aws --yes
+  assert_rc 0
+}
+
+test_uninstall_removes_commands_and_keeps_credentials() {
+  install_env
+  "$TEST_BASH" "$ROOT/install.sh" >/dev/null 2>&1 || fail "install failed"
+  mkdir -p "$S3SEAL_CONFIG_DIR"; echo keep > "$S3SEAL_CONFIG_DIR/recipient"
+  OUT="$("$TEST_BASH" "$ROOT/uninstall.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0; assert_out "Encrypted credentials kept"
+  assert_no_file "$HOME/.local/bin/s3seal"
+  assert_no_file "$HOME/.local/share/s3seal"
+  assert_file "$S3SEAL_CONFIG_DIR/recipient"
+}
+
+test_uninstall_purge_needs_confirmation() {
+  command -v setsid >/dev/null 2>&1 || return 0
+  mkdir -p "$S3SEAL_CONFIG_DIR"; echo keep > "$S3SEAL_CONFIG_DIR/recipient"
+  OUT="$(setsid "$TEST_BASH" "$ROOT/uninstall.sh" --purge < /dev/null 2>&1)" && RC=0 || RC=$?
+  assert_rc 1; assert_out "pass --yes"
+  assert_file "$S3SEAL_CONFIG_DIR/recipient"
+  OUT="$(setsid "$TEST_BASH" "$ROOT/uninstall.sh" --purge --yes < /dev/null 2>&1)" && RC=0 || RC=$?
+  assert_rc 0; assert_out "Purged"
+  assert_no_file "$S3SEAL_CONFIG_DIR"
+}
+
+test_uninstall_refuses_while_credentials_are_sealed() {
+  install_env
+  aws_env; seed_credentials
+  "$TEST_BASH" "$ROOT/install.sh" >/dev/null 2>&1 || fail "install failed"
+  run_out "$HOME/.local/share/s3seal/bin/s3seal" enable aws --yes
+  OUT="$("$TEST_BASH" "$ROOT/uninstall.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 1; assert_out "Credentials are still sealed"
+  assert_file "$HOME/.local/share/s3seal/bin/s3seal"
+}
+
 test_install_checksums_are_current() {
   local f actual
   for f in bin/mc bin/aws bin/s3seal lib/common.sh lib/ini.sh lib/aws.sh lib/mc.sh; do
@@ -739,52 +811,6 @@ test_install_checksums_are_current() {
     fi
     grep -qF "$actual  $f" "$ROOT/install.sh" || fail "install.sh is stale for $f; run scripts/update-checksum.sh"
   done
-}
-
-test_uninstall_keeps_credentials_by_default() {
-  install_env
-  "$TEST_BASH" "$ROOT/install.sh" >/dev/null 2>&1 || fail "install failed"
-  store prod https://minio.example.com AK1 SECRET123
-  OUT="$("$TEST_BASH" "$ROOT/uninstall.sh" 2>&1)" && RC=0 || RC=$?
-  assert_rc 0; assert_out "Encrypted credentials kept"
-  assert_no_file "$HOME/.local/bin/mc"
-  assert_no_file "$HOME/.local/share/s3seal"
-  assert_file "$S3SEAL_CONFIG_DIR/aliases/prod.url.asc"
-}
-
-test_uninstall_refuses_while_aws_is_sealed() {
-  install_env
-  aws_env; seed_credentials
-  "$TEST_BASH" "$ROOT/install.sh" >/dev/null 2>&1 || fail "install failed"
-  run_out "$HOME/.local/share/s3seal/bin/s3seal" enable aws --yes
-  OUT="$("$TEST_BASH" "$ROOT/uninstall.sh" 2>&1)" && RC=0 || RC=$?
-  assert_rc 1; assert_out "Run \"s3seal disable aws\" first"
-  assert_file "$HOME/.local/share/s3seal/bin/s3seal"
-}
-
-test_uninstall_purge_needs_confirmation() {
-  command -v setsid >/dev/null 2>&1 || return 0
-  store prod https://minio.example.com AK1 SECRET123
-  OUT="$(setsid "$TEST_BASH" "$ROOT/uninstall.sh" --purge < /dev/null 2>&1)" && RC=0 || RC=$?
-  assert_rc 1; assert_out "pass --yes"
-  assert_file "$S3SEAL_CONFIG_DIR/aliases/prod.url.asc"
-  OUT="$(setsid "$TEST_BASH" "$ROOT/uninstall.sh" --purge --yes < /dev/null 2>&1)" && RC=0 || RC=$?
-  assert_rc 0; assert_out "Purged"
-  assert_no_file "$S3SEAL_CONFIG_DIR"
-}
-
-test_install_twice_is_idempotent() {
-  install_env
-  cp "$MIDNIGHT" "$T/bin/mc"
-  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
-  assert_rc 0; assert_out "Next steps"
-  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
-  assert_rc 0
-  assert_out "s3seal 1.1.0 is already installed and up to date"
-  assert_not_out "Next steps"
-  assert_not_out "installed s3seal"
-  assert_not_out "linked mc"
-  [[ "$(readlink "$HOME/.local/bin/s3seal")" == "$HOME/.local/share/s3seal/bin/s3seal" ]] || fail "link lost"
 }
 
 test_install_reports_upgrade_over_older_version() {

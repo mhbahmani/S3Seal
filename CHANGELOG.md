@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Changed
+
+- The installer asks which clients to protect and where to install, and shows
+  progress while it downloads and checks files.
+- `s3seal enable|disable <client>` ask before moving credentials, and
+  `s3seal migrate <client> [--to plain]` does the migration later. `--yes` and
+  `--no-migrate` skip the question.
+- `s3seal enable mc` and `disable mc` work like `aws`. `mc alias migrate` is
+  replaced by `s3seal migrate mc`.
+- The installer moves an official client out of `PATH` only with your consent,
+  and records its location for `s3seal`.
+- The entry points live in `bin/`, with the libraries in `lib/`.
+
 ### Renamed
 
 - The project is now s3seal (was sealedmc). Store path is `~/.config/s3seal`,

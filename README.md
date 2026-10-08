@@ -3,8 +3,8 @@
 `s3seal` keeps S3 credentials for `mc` and `aws` encrypted with GPG, instead of
 plaintext in `~/.mc/config.json` and `~/.aws/credentials`.
 
-You keep using `mc` and `aws` as usual. `s3seal` only turns sealing on or off
-for each tool and shows what is sealed.
+You keep using `mc` and `aws` as usual. `s3seal` turns sealing on or off for
+each client and moves its credentials between plaintext and encrypted storage.
 
 ## Install
 
@@ -12,45 +12,58 @@ for each tool and shows what is sealed.
 curl -fsSL https://raw.githubusercontent.com/mhbahmani/s3seal/master/install.sh | bash
 ```
 
-Requirements: `bash`, `gpg`, and the MinIO client `mc` if you use it. The
-installer finds the real `mc` binary and asks you to move it out of `PATH`
-first, because the `mc` wrapper takes its name.
+The installer asks which clients to protect and where to install. Press Enter
+to accept the defaults. If an official client is on your `PATH`, it asks before
+moving it out of the way, so that `s3seal` can use the name.
 
-Set your GPG recipient once:
+Requirements: `bash`, `gpg`, `curl`. Each client you protect needs its own
+official binary (`mc` or `aws`).
+
+Running the installer again is safe. It reports what it found.
+
+Set your GPG key once, or the installer will ask for it:
 
 ```bash
 echo 'you@example.com' > ~/.config/s3seal/recipient
 ```
 
-Running the installer again is safe. It reports what it found.
-
-## mc
+## Protecting a client
 
 ```bash
-mc alias set prod https://minio.example.com   # asks for keys, stores them encrypted
+s3seal enable mc      # link the mc wrapper, then offer to migrate its credentials
+s3seal enable aws     # same for the AWS CLI
+s3seal status         # shows sealed and plaintext credentials
+s3seal disable mc     # unlink, then offer to restore plaintext credentials
+s3seal disable aws
+```
+
+`enable` and `disable` ask before moving any credentials. Answer `n` and they
+print the manual steps and the command to run later. Use `--yes` to migrate
+without asking, or `--no-migrate` to skip the migration.
+
+To migrate later:
+
+```bash
+s3seal migrate mc              # encrypt plaintext credentials
+s3seal migrate mc --to plain   # write sealed credentials back as plaintext
+```
+
+Migration works the same way for every client. Each client uses its own store.
+
+## Using mc and aws
+
+After `s3seal enable`, you keep using `mc` and `aws` as before:
+
+```bash
+mc alias set prod https://minio.example.com   # keys are stored encrypted
 mc ls prod/bucket
-mc alias list
-mc alias remove prod
-mc alias migrate                              # encrypts aliases from ~/.mc/config.json
-```
-
-`mc alias migrate` moves each plaintext alias into the encrypted store and
-removes its plaintext copy. It skips aliases it cannot store and says why.
-
-## AWS CLI
-
-```bash
-s3seal enable aws      # seal every profile with static keys
-aws configure          # new keys are stored encrypted
+aws configure --profile prod                  # keys are stored encrypted
 aws --profile prod s3 ls
-s3seal status          # shows sealed and plaintext profiles
-s3seal disable aws     # restore plaintext keys, after confirmation
 ```
 
-Sealed keys are stored in `~/.config/s3seal/aws/`. Each sealed profile in
-`~/.aws/config` uses `credential_process`, so the AWS CLI and SDKs fetch the
-keys when they need them. `aws configure` is handled by `s3seal`. Other
-commands run the real CLI unchanged.
+For `aws`, each sealed profile's keys are fetched on demand through
+`credential_process`. For `mc`, the wrapper decrypts only the aliases a command
+uses.
 
 Profiles with temporary session tokens and SSO profiles are not sealed.
 
@@ -61,7 +74,7 @@ s3seal upgrade --check   # show installed and available versions
 s3seal upgrade           # install the latest release
 s3seal --version
 
-# remove commands, keep encrypted credentials
+# remove the commands, keep encrypted credentials
 curl -fsSL https://raw.githubusercontent.com/mhbahmani/s3seal/master/uninstall.sh | bash
 
 # also delete encrypted credentials, after confirmation
@@ -72,7 +85,8 @@ curl -fsSL https://raw.githubusercontent.com/mhbahmani/s3seal/master/uninstall.s
 from, and the installer checks every file against its checksums. It does not
 work on a git checkout.
 
-Uninstall refuses while AWS profiles are sealed. Run `s3seal disable aws` first.
+Uninstall refuses while credentials are sealed. Run `s3seal disable` for each
+client first.
 
 ## Settings
 
@@ -80,7 +94,8 @@ Uninstall refuses while AWS profiles are sealed. Run `s3seal disable aws` first.
 | --- | --- |
 | `S3SEAL_GPG_RECIPIENT` | GPG key id or email to encrypt to |
 | `S3SEAL_CONFIG_DIR` | Store location (default `~/.config/s3seal`) |
-| `S3SEAL_INSTALL_DIR` | Where the `mc`, `aws` and `s3seal` links go (default `~/.local/bin`) |
+| `S3SEAL_INSTALL_DIR` | Where the commands are linked (default `~/.local/bin`) |
+| `S3SEAL_YES` | Installer: accept every default without asking |
 | `MC_BIN` | Path to the real `mc` binary |
 | `S3SEAL_LIST_ENDPOINTS` | Show endpoints in `mc alias list` (decrypts every alias) |
 | `S3SEAL_DEBUG` | Always show gpg's diagnostics |
@@ -91,6 +106,8 @@ Uninstall refuses while AWS profiles are sealed. Run `s3seal disable aws` first.
   names may contain `-` and `.`.
 - `mc` keys cannot contain `:`, because `mc` reads them from one URL string.
 - `mc --api`, `--path` and `mc config host` are not supported.
+- `s3seal disable mc` writes the credentials back to `config.json` directly,
+  so it needs `python3`, and it does not check that the servers are reachable.
 - Non-interactive use asks for the GPG passphrase unless `gpg-agent` has it
   cached.
 - While a command runs, its credentials are visible in `/proc/<pid>/environ` to

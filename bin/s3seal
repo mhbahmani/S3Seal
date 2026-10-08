@@ -251,7 +251,7 @@ cmd_upgrade() {
   # so the upgrade is verified the same way as a fresh install.
   curl -fsSL "https://raw.githubusercontent.com/$repo/$ref/install.sh" -o "$tmp/install.sh" \
     || die "cannot fetch the installer from $repo@$ref"
-  S3SEAL_REPO="$repo" S3SEAL_REF="$ref" S3SEAL_SHARE_DIR="$S3SEAL_HOME" \
+  S3SEAL_UPGRADE=1 S3SEAL_REPO="$repo" S3SEAL_REF="$ref" S3SEAL_SHARE_DIR="$S3SEAL_HOME" \
     S3SEAL_INSTALL_DIR="$BIN_DIR" S3SEAL_CONFIG_DIR="$CONFIG_DIR" bash "$tmp/install.sh"
 }
 

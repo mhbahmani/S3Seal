@@ -12,10 +12,11 @@ MC_CONFIG_FILE="${MC_CONFIG_DIR:-$HOME/.mc}/config.json"
 # called "mc" is only accepted if it identifies as MinIO's client.
 is_minio_mc() { "$1" --version 2>/dev/null | grep -q 'RELEASE\.'; }
 
-# Prints the real client: MC_BIN, then the recorded path, then well-known
-# locations. Never prints an s3seal entry point.
+# Prints the real client, in this order: MC_BIN, the path recorded by the
+# installer or "s3seal enable", the private locations, then PATH. Never prints an
+# s3seal entry point.
 mc_real_binary() {
-  local c
+  local c d
   for c in ${MC_BIN:-} "$(head -n1 "$MC_PATH_FILE" 2>/dev/null || true)"; do
     [[ -n "$c" && -x "$c" ]] || continue
     is_s3seal_entry "$c" && continue
@@ -32,6 +33,15 @@ mc_real_binary() {
     is_minio_mc "$c" || continue
     printf '%s' "$c"
     return 0
+  done
+  for d in ${PATH//:/ }; do
+    for c in "$d/mc" "$d/mcli"; do
+      [[ -f "$c" && -x "$c" ]] || continue
+      is_s3seal_entry "$c" && continue
+      is_minio_mc "$c" || continue
+      printf '%s' "$c"
+      return 0
+    done
   done
   return 1
 }

@@ -4,9 +4,9 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/mhbahmani/s3seal/master/install.sh | bash
 #
-# Installs s3seal into ~/.local/share/s3seal and links the mc wrapper and the
-# s3seal command into ~/.local/bin. The AWS CLI is not touched until you run
-# "s3seal enable aws".
+# Asks which clients to protect and where to install. Press Enter to accept the
+# defaults. Installs s3seal, moves official clients out of PATH when you agree,
+# and runs "s3seal enable" for each protected client.
 
 set -euo pipefail
 
@@ -16,9 +16,6 @@ REPO="${S3SEAL_REPO:-$DEFAULT_REPO}"
 REF="${S3SEAL_REF:-$DEFAULT_REF}"
 RAW_URL="https://raw.githubusercontent.com/$REPO/$REF"
 
-INSTALL_DIR="${S3SEAL_INSTALL_DIR:-$HOME/.local/bin}"
-SHARE_DIR="${S3SEAL_SHARE_DIR:-$HOME/.local/share/s3seal}"
-LIBEXEC_DIR="${S3SEAL_LIBEXEC_DIR:-$HOME/.local/libexec}"
 CONFIG_DIR="${S3SEAL_CONFIG_DIR:-$HOME/.config/s3seal}"
 
 # Files to install. Keep in sync with scripts/update-checksum.sh.
@@ -30,11 +27,11 @@ ENTRIES="bin/mc bin/aws bin/s3seal"
 CHECKSUMS="$(cat <<'SUMS'
 339298bd0141b31e5eaebad07db019cfc55111bee470aff57c63edcb0976d309  bin/mc
 97a92a50f6365665732674de22853329215d3dda1be4060cb38ea704d4908469  bin/aws
-23c7bc4aa9529d249d3d21b56fd05f6ce9dcf6f70d895957c114f4f01fc4b284  bin/s3seal
+a815f77d3c3439939446365c98fd4f2e5c52b0c923dde65a4867f1fdfd3bf3ba  bin/s3seal
 473b91689311488a3ec5b5eb60df98e4dbfddc06be50a43dd1e07dd38549d333  lib/common.sh
 902dc7031554f646477c24687e7cd87d70e2820b9a9d087641da3e9b526339c5  lib/ini.sh
 f2683e3fdd92606e411d77a02f77e6841728b80416428ec3b932d9e5225cc5ad  lib/aws.sh
-0c56063501e3fa9cb8704b6776a6e8b4157f7718f6d4776ea495ade616b35b35  lib/mc.sh
+047c9db9c2dfa4fc9e3fede5f2735b62d9cf5170d826120d4da8573976463b13  lib/mc.sh
 SUMS
 )"
 
@@ -49,9 +46,32 @@ ok()   { printf '%s✓%s %s\n' "$G" "$R" "$*"; }
 warn() { printf '%s!%s %s\n' "$Y" "$R" "$*"; }
 fail() { printf '%s✗%s %s\n' "$E" "$R" "$*" >&2; exit 1; }
 
-is_wrapper() { grep -q '^# s3seal:' "$1" 2>/dev/null; }
-# On many Linux distributions "mc" is Midnight Commander, not MinIO's client.
-is_minio_mc() { "$1" --version 2>/dev/null | grep -q 'RELEASE\.'; }
+# Upgrades run through "s3seal upgrade" and never ask questions.
+# S3SEAL_YES=1 accepts every default without asking, for scripted installs.
+INTERACTIVE=0
+if [[ -z "${S3SEAL_UPGRADE:-}" && -z "${S3SEAL_YES:-}" ]] && { : < /dev/tty; } 2>/dev/null; then
+  INTERACTIVE=1
+fi
+
+# ask QUESTION DEFAULT(y|n): returns 0 for yes. Without a terminal, uses DEFAULT.
+ask() {
+  local reply=''
+  if (( INTERACTIVE )); then
+    read -r -p "$1 " reply < /dev/tty || true
+  fi
+  reply="${reply:-$2}"
+  [[ "$reply" =~ ^[Yy] ]]
+}
+
+# ask_dir QUESTION DEFAULT: prints the chosen directory, with ~ expanded.
+ask_dir() {
+  local reply=''
+  if (( INTERACTIVE )); then
+    read -r -p "$1 [$2]: " reply < /dev/tty || true
+  fi
+  reply="${reply:-$2}"
+  printf '%s' "${reply/#\~/$HOME}"
+}
 
 sha256() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -63,28 +83,79 @@ sha256() {
 
 sum_for() { printf '%s\n' "$CHECKSUMS" | awk -v f="$1" '$2 == f { print $1 }'; }
 
-mc_download_url() {
-  local os arch
-  case "$(uname -s)" in
-    Linux) os=linux ;;
-    Darwin) os=darwin ;;
-    *) os="$(uname -s | tr '[:upper:]' '[:lower:]')" ;;
-  esac
-  case "$(uname -m)" in
-    x86_64|amd64) arch=amd64 ;;
-    aarch64|arm64) arch=arm64 ;;
-    *) arch="$(uname -m)" ;;
-  esac
-  printf 'https://dl.min.io/client/mc/release/%s-%s/mc' "$os" "$arch"
+is_wrapper() { grep -q '^# s3seal:' "$1" 2>/dev/null; }
+
+# On many Linux distributions "mc" is Midnight Commander, not MinIO's client.
+is_minio_mc() { "$1" --version 2>/dev/null | grep -q 'RELEASE\.'; }
+
+# Resolves symlinks, so links into our own install are recognised.
+resolve_path() {
+  local s="$1" t
+  while [[ -L "$s" ]]; do
+    t="$(readlink "$s")"
+    [[ "$t" == /* ]] && s="$t" || s="$(dirname "$s")/$t"
+  done
+  printf '%s/%s' "$(cd "$(dirname "$s")" && pwd)" "$(basename "$s")"
 }
 
+# Prints the official client for NAME (a list of candidate names), skipping
+# s3seal's own links. Prints nothing if there is none.
+find_official() {
+  local names="$1" name d c r
+  if [[ -r "$CONFIG_DIR/${names%% *}-path" ]]; then
+    c="$(head -n1 "$CONFIG_DIR/${names%% *}-path")"
+    [[ -x "$c" ]] && { printf '%s' "$c"; return 0; }
+  fi
+  for name in $names; do
+    for d in ${PATH//:/ }; do
+      [[ -n "$d" ]] || continue
+      c="$d/$name"
+      [[ -f "$c" && -x "$c" ]] || continue
+      r="$(resolve_path "$c")"
+      [[ "$r" == */s3seal/bin/* ]] && continue
+      if [[ "$name" == mc ]] && ! is_minio_mc "$c"; then
+        warn "$c is not the MinIO client (Midnight Commander?); ignoring it" >&2
+        continue
+      fi
+      printf '%s' "$c"
+      return 0
+    done
+  done
+  return 1
+}
+
+version_of() { sed -n 's/^VERSION="\(.*\)"$/\1/p' "$1" 2>/dev/null | head -n1; }
+
+# --- questions ---------------------------------------------------------------
 printf '\n%ss3seal installer%s\n\n' "$B" "$R"
-info "s3seal keeps AWS and mc keys encrypted with GPG instead of plaintext files."
-info ""
-
 command -v gpg >/dev/null 2>&1 || fail "gpg is required"
+command -v curl >/dev/null 2>&1 || fail "curl is required"
 
-# --- stage the files, from this checkout or from GitHub ----------------------
+SEAL_MC=0 SEAL_AWS=0
+if [[ -z "${S3SEAL_UPGRADE:-}" ]]; then
+  info "s3seal keeps the keys of these clients encrypted with GPG:"
+  info "  mc    the MinIO client"
+  info "  aws   the AWS CLI"
+  info ""
+  ask "Protect mc? [Y/n]:" y && SEAL_MC=1 || true
+  ask "Protect aws? [Y/n]:" y && SEAL_AWS=1 || true
+  info ""
+fi
+
+if [[ -n "${S3SEAL_SHARE_DIR:-}" ]]; then
+  SHARE_DIR="$S3SEAL_SHARE_DIR"
+else
+  SHARE_DIR="$(ask_dir "Install s3seal to" "$HOME/.local/share/s3seal")"
+fi
+if [[ -n "${S3SEAL_INSTALL_DIR:-}" ]]; then
+  BIN_DIR="$S3SEAL_INSTALL_DIR"
+else
+  BIN_DIR="$(ask_dir "Put the commands in" "$HOME/.local/bin")"
+fi
+LIBEXEC_DIR="${S3SEAL_LIBEXEC_DIR:-}"   # asked later, only if an official client must move
+
+# --- download and verify -----------------------------------------------------
+info ""
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/bin" "$stage/lib"
@@ -95,25 +166,27 @@ if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
 fi
 
 if [[ -n "$script_dir" && -f "$script_dir/bin/mc" && -f "$script_dir/lib/common.sh" ]]; then
+  info "Copying s3seal from this checkout..."
   for f in $FILES; do cp "$script_dir/$f" "$stage/$f"; done
-  ok "using s3seal from this checkout"
 else
-  command -v curl >/dev/null 2>&1 || fail "curl is required to download s3seal"
+  info "Downloading s3seal from $REPO@$REF..."
   verify=0
   [[ "$REPO" == "$DEFAULT_REPO" && "$REF" == "$DEFAULT_REF" ]] && verify=1
   for f in $FILES; do
     curl -fsSL "$RAW_URL/$f" -o "$stage/$f" || fail "download failed: $RAW_URL/$f"
-    if (( verify )); then
+    info "  $f"
+  done
+  if (( verify )); then
+    info "Checking checksums..."
+    for f in $FILES; do
       expected="$(sum_for "$f")"
       actual="$(sha256 "$stage/$f")"
       [[ -n "$expected" && "$actual" == "$expected" ]] \
         || fail "checksum mismatch for $f (expected ${expected:-none}, got $actual). Refusing to install."
-    fi
-  done
-  if (( verify )); then
-    ok "downloaded and verified s3seal from $REPO@$REF"
+    done
+    ok "all files match their checksums"
   else
-    warn "downloaded s3seal from $REPO@$REF; not verified (only the default ref has checksums)"
+    warn "not verified: only the default ref has checksums"
   fi
 fi
 
@@ -125,46 +198,7 @@ for f in $FILES; do
   bash -n "$stage/$f" || fail "$f failed a syntax check; refusing to install"
 done
 
-# --- the real mc must be off PATH, because the mc wrapper takes its name ----
-found_mc=""
-while IFS= read -r candidate; do
-  [[ -n "$candidate" ]] || continue
-  is_wrapper "$candidate" && continue
-  if ! is_minio_mc "$candidate"; then
-    warn "$candidate is not the MinIO client (Midnight Commander?); the mc wrapper will shadow it on PATH."
-    continue
-  fi
-  found_mc="$candidate"
-  break
-done < <(type -a -p mc 2>/dev/null || true)
-
-if [[ -n "$found_mc" ]]; then
-  fail "the real mc binary is still on your PATH: $found_mc
-Move it out of PATH so the wrapper can take over the \"mc\" name:
-    mkdir -p $LIBEXEC_DIR && mv $found_mc $LIBEXEC_DIR/mc
-Then re-run this installer."
-fi
-
-real_mc=""
-for candidate in "${MC_BIN:-}" "$LIBEXEC_DIR/mc" "/usr/local/libexec/mc" "/opt/minio/mc"; do
-  [[ -n "$candidate" && -x "$candidate" ]] || continue
-  is_wrapper "$candidate" && continue
-  is_minio_mc "$candidate" || { warn "ignoring $candidate: not the MinIO client"; continue; }
-  real_mc="$candidate"
-  break
-done
-
-if [[ -z "$real_mc" ]]; then
-  fail "could not find the real mc binary.
-s3seal does not bundle the MinIO client; it wraps yours.
-Put it at $LIBEXEC_DIR/mc, or set MC_BIN, then re-run. To download it:
-    mkdir -p $LIBEXEC_DIR && curl -fsSL $(mc_download_url) -o $LIBEXEC_DIR/mc && chmod +x $LIBEXEC_DIR/mc"
-fi
-ok "found the real MinIO client at $real_mc"
-
-# --- compare with what is already installed ----------------------------------
-version_of() { sed -n 's/^VERSION="\(.*\)"$/\1/p' "$1" 2>/dev/null | head -n1; }
-
+# --- install -----------------------------------------------------------------
 installed_version=""
 [[ -f "$SHARE_DIR/bin/s3seal" ]] && installed_version="$(version_of "$SHARE_DIR/bin/s3seal")"
 new_version="$(version_of "$stage/bin/s3seal")"
@@ -186,13 +220,12 @@ fi
 
 case "$state" in
   fresh)   info "Installing s3seal $new_version." ;;
-  same)    ok "s3seal $new_version is already installed and up to date. Nothing to copy." ;;
+  same)    ok "s3seal $new_version is already installed and up to date." ;;
   refresh) info "s3seal $new_version is already installed. Refreshing ${#changed[@]} changed file(s)." ;;
   upgrade) info "Upgrading s3seal $installed_version -> $new_version." ;;
 esac
 
-# --- install ----------------------------------------------------------------
-mkdir -p "$SHARE_DIR/bin" "$SHARE_DIR/lib" "$INSTALL_DIR"
+mkdir -p "$SHARE_DIR/bin" "$SHARE_DIR/lib" "$BIN_DIR"
 if [[ "$state" != same ]]; then
   for f in "${changed[@]}"; do
     case "$f" in
@@ -209,8 +242,8 @@ fi
 printf '%s %s\n' "$REPO" "$REF" > "$SHARE_DIR/source"
 
 # Replaces a symlink or an older regular-file wrapper; refuses anything else.
-link_entry() {
-  local target="$INSTALL_DIR/$1"
+link_command() {
+  local target="$BIN_DIR/$1"
   if [[ -L "$target" && "$(readlink "$target")" == "$SHARE_DIR/bin/$1" ]]; then
     return 0
   fi
@@ -222,36 +255,75 @@ link_entry() {
     fi
   fi
   ln -s "$SHARE_DIR/bin/$1" "$target"
-  ok "linked $1 into $INSTALL_DIR"
 }
-link_entry mc
-link_entry s3seal
+link_command s3seal
+ok "linked s3seal into $BIN_DIR"
 
-mkdir -p "$CONFIG_DIR"
-chmod 700 "$CONFIG_DIR"
-printf '%s\n' "$real_mc" > "$CONFIG_DIR/mc-path"
-ok "recorded the real mc path in $CONFIG_DIR/mc-path"
+# --- protected clients ------------------------------------------------------
+# Moves an official client out of PATH (with consent) and records where it is,
+# then lets "s3seal enable" take over the name.
+setup_client() {  # NAME CANDIDATES
+  local tool="$1" found new
+  found="$(find_official "$2")" || true
+  if [[ -z "$found" ]]; then
+    warn "$tool: no official client found on PATH. Install it, then run: $SHARE_DIR/bin/s3seal enable $tool"
+    return 0
+  fi
+  info "$tool: found the official client at $found"
 
+  local here; here="$(dirname "$found")"
+  if [[ "$here" != "$HOME/.local/libexec" && ( -z "$LIBEXEC_DIR" || "$here" != "$LIBEXEC_DIR" ) ]]; then
+    if (( INTERACTIVE )) && ask "  Move it out of PATH so s3seal can use the name $tool? [Y/n]:" y; then
+      if [[ -z "$LIBEXEC_DIR" ]]; then
+        LIBEXEC_DIR="$(ask_dir "  Keep it in" "$HOME/.local/libexec")"
+      fi
+      mkdir -p "$LIBEXEC_DIR"
+      new="$LIBEXEC_DIR/$tool"
+      if mv -f "$found" "$new" 2>/dev/null; then
+        ok "  moved to $new"
+        found="$new"
+      else
+        warn "  could not move it (permission?). To do it yourself: sudo mv $found $new"
+      fi
+    else
+      info "  left in place; $BIN_DIR must come before its directory on PATH."
+    fi
+  fi
+
+  mkdir -p "$CONFIG_DIR"
+  printf '%s\n' "$found" > "$CONFIG_DIR/$tool-path"
+  S3SEAL_INSTALL_DIR="$BIN_DIR" "$SHARE_DIR/bin/s3seal" enable "$tool" \
+    || warn "could not enable $tool; run: s3seal enable $tool"
+}
+
+if [[ -z "${S3SEAL_UPGRADE:-}" ]]; then
+  (( SEAL_MC )) && { info ""; setup_client mc "mc mcli"; } || true
+  (( SEAL_AWS )) && { info ""; setup_client aws "aws"; } || true
+fi
+
+# --- GPG recipient -----------------------------------------------------------
+if [[ -z "${S3SEAL_UPGRADE:-}" && ! -s "$CONFIG_DIR/recipient" && -z "${S3SEAL_GPG_RECIPIENT:-}" ]]; then
+  if (( INTERACTIVE )); then
+    info ""
+    rcpt=''
+    read -r -p "GPG key for encrypting credentials (email or key id, Enter to set later): " rcpt < /dev/tty || true
+    if [[ -n "$rcpt" ]]; then
+      mkdir -p "$CONFIG_DIR"
+      printf '%s\n' "$rcpt" > "$CONFIG_DIR/recipient"
+      ok "saved the GPG recipient to $CONFIG_DIR/recipient"
+    fi
+  fi
+  if [[ ! -s "$CONFIG_DIR/recipient" && -z "${S3SEAL_GPG_RECIPIENT:-}" ]]; then
+    warn "no GPG recipient yet. Set one before storing credentials:"
+    info "    echo 'you@example.com' > $CONFIG_DIR/recipient"
+  fi
+fi
+
+# --- summary -----------------------------------------------------------------
+info ""
 case ":$PATH:" in
-  *":$INSTALL_DIR:"*) ;;
-  *)
-    warn "$INSTALL_DIR is not on your PATH. Add this to your shell rc file and start a new shell:"
-    info "    export PATH=\$PATH:$INSTALL_DIR"
-    ;;
+  *":$BIN_DIR:"*) ;;
+  *) warn "$BIN_DIR is not on your PATH. Add this to your shell rc file and start a new shell:"
+     info "    export PATH=\$PATH:$BIN_DIR" ;;
 esac
-
-if [[ ! -s "$CONFIG_DIR/recipient" && -z "${S3SEAL_GPG_RECIPIENT:-}" ]]; then
-  warn "no GPG recipient configured yet:"
-  info "    echo 'you@example.com' > $CONFIG_DIR/recipient   (or gpg --full-generate-key first)"
-fi
-
-if [[ "$state" == fresh ]]; then
-  info ""
-  info "Next steps:"
-  info "  1. mc alias set prod https://minio.example.com      # stored encrypted"
-  info "  2. s3seal enable aws                                 # seal existing AWS profiles, then use aws as before"
-  info "  3. s3seal status                                     # shows what is sealed"
-else
-  info ""
-  info "Run 's3seal status' to see what is sealed. Upgrade later with 's3seal upgrade'."
-fi
+info "Done. Check the state with: s3seal status"
