@@ -80,9 +80,16 @@ is_s3seal_entry() {
   [[ "$r" == "$S3SEAL_HOME/bin/mc" || "$r" == "$S3SEAL_HOME/bin/aws" || "$r" == "$S3SEAL_HOME/bin/s3seal" ]]
 }
 
-# Print the first executable NAME on PATH that is not a s3seal entry point.
+# Print the real NAME binary: its recorded path, else the first executable on
+# PATH that is not a s3seal entry point.
 find_real() {
-  local name="$1" d c IFS=:
+  local name="$1" d c IFS=: recorded
+  # A binary moved out of PATH by the installer is recorded here.
+  recorded="$(head -n1 "$CONFIG_DIR/$name-path" 2>/dev/null || true)"
+  if [[ -n "$recorded" && -x "$recorded" ]]; then
+    printf '%s' "$recorded"
+    return 0
+  fi
   for d in $PATH; do
     [[ -n "$d" ]] || continue
     c="$d/$name"

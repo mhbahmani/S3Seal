@@ -330,7 +330,7 @@ JSON
   echo '{"status":"success","alias":"prod","URL":"https://minio.example.com","accessKey":"AK1","secretKey":"SECRET123","api":"S3v4","path":"auto","src":"/x/config.json"}' >> "$FAKE_MC_CONFIG"
   run_mc alias list
   assert_out "plaintext credentials for: prod"
-  assert_out "mc alias migrate"
+  assert_out "s3seal migrate mc"
 }
 
 test_remove() {
@@ -358,12 +358,12 @@ test_migrate() {
 {"status":"success","alias":"legacy","URL":"https://l.example.com","accessKey":"AK3","secretKey":"SECRET789","api":"S3v2","path":"auto","src":"/x/config.json"}
 {"status":"success","alias":"envy","URL":"https://e.example.com","accessKey":"AK4","secretKey":"SECRET000","api":"S3v4","src":"env"}
 JSON
-  run_mc alias migrate
+  run_entry "$ROOT/bin/s3seal" migrate mc
   assert_rc 1
-  assert_out "Migrated alias prod"
+  assert_out "Sealed mc alias prod"
   assert_out "skipping 'my-minio'"
   assert_out "skipping 'legacy'"
-  assert_out "1 migrated, 2 skipped"
+  assert_out "1 sealed, 2 skipped"
   assert_not_out "envy"
   [[ "$(stored prod)" == 'https://AK1:a&b/c+d"e\f@minio.example.com' ]] || fail "stored: $(stored prod)"
   assert_log "ARGS: [alias] [remove] [prod]"
@@ -371,22 +371,10 @@ JSON
   grep -q '"alias":"play"' "$FAKE_MC_CONFIG" || fail "play was touched"
 }
 
-test_migrate_selected_names() {
-  cat > "$FAKE_MC_CONFIG" <<'JSON'
-{"status":"success","alias":"prod","URL":"https://p.example.com","accessKey":"AK1","secretKey":"SECRET123","api":"s3v4","path":"auto","src":"/x/config.json"}
-{"status":"success","alias":"dev","URL":"https://d.example.com","accessKey":"AK2","secretKey":"SECRET456","api":"S3v4","path":"auto","src":"/x/config.json"}
-JSON
-  run_mc alias migrate dev
-  assert_rc 0
-  assert_out "1 migrated, 0 skipped"
-  assert_file "$S3SEAL_CONFIG_DIR/aliases/dev.url.asc"
-  assert_no_file "$S3SEAL_CONFIG_DIR/aliases/prod.url.asc"
-}
-
 test_migrate_does_not_overwrite() {
   store prod https://minio.example.com AK1 SECRET123
   echo '{"status":"success","alias":"prod","URL":"https://other.example.com","accessKey":"AKX","secretKey":"SECRETX1","api":"S3v4","path":"auto","src":"/x/config.json"}' > "$FAKE_MC_CONFIG"
-  run_mc alias migrate
+  run_entry "$ROOT/bin/s3seal" migrate mc
   assert_rc 1; assert_out "already exists"
   [[ "$(stored prod)" == "https://AK1:SECRET123@minio.example.com" ]] || fail "existing alias overwritten"
 }
@@ -429,6 +417,54 @@ test_midnight_commander_is_not_used() {
   assert_rc 0; assert_out "wrapping $HOME/.local/libexec/mc"
 }
 
+# --- mc: enable, disable and migrate ----------------------------------------
+mc_plaintext_config() {
+  cat > "$FAKE_MC_CONFIG" <<'JSON'
+{"status":"success","alias":"prod","URL":"https://minio.example.com","accessKey":"AK1","secretKey":"SECRET123","api":"S3v4","path":"auto","src":"/x/config.json"}
+JSON
+}
+
+test_mc_enable_seals_with_yes() {
+  mc_plaintext_config
+  export S3SEAL_INSTALL_DIR="$HOME/.local/bin"
+  run_out "$ROOT/bin/s3seal" enable mc --yes
+  assert_rc 0
+  assert_out "Sealed mc alias prod"
+  assert_out "mc is sealed."
+  assert_file "$S3SEAL_CONFIG_DIR/aliases/prod.url.asc"
+  [[ "$(readlink "$HOME/.local/bin/mc")" == "$ROOT/bin/mc" ]] || fail "mc not linked"
+  ! grep -q '"alias":"prod"' "$FAKE_MC_CONFIG" || fail "plaintext alias still in mc config"
+}
+
+test_mc_enable_without_terminal_points_at_migrate() {
+  mc_plaintext_config
+  export S3SEAL_INSTALL_DIR="$HOME/.local/bin"
+  run_entry "$ROOT/bin/s3seal" enable mc
+  assert_rc 0
+  assert_out "Left 1 credential(s) in plaintext"
+  assert_out "s3seal migrate mc"
+  assert_out "mc alias set NAME URL"
+  assert_no_file "$S3SEAL_CONFIG_DIR/aliases/prod.url.asc"
+}
+
+test_mc_disable_writes_back_without_contacting_servers() {
+  mc_plaintext_config
+  export S3SEAL_INSTALL_DIR="$HOME/.local/bin" MC_CONFIG_DIR="$T/mccfg"
+  run_out "$ROOT/bin/s3seal" enable mc --yes
+  assert_rc 0
+  export FAKE_MC_LS_RC=1
+  run_out "$ROOT/bin/s3seal" disable mc --yes
+  assert_rc 0
+  assert_out "Unsealed mc alias prod"
+  assert_no_file "$S3SEAL_CONFIG_DIR/aliases/prod.url.asc"
+  assert_in "$T/mccfg/config.json" '"accessKey": "AK1"'
+  assert_in "$T/mccfg/config.json" '"url": "https://minio.example.com"'
+  assert_in "$T/mccfg/config.json" '"secretKey": "SECRET123"'
+  [[ "$(stat -c %a "$T/mccfg/config.json" 2>/dev/null || stat -f %Lp "$T/mccfg/config.json")" == 600 ]] \
+    || fail "mc config is not 0600"
+  assert_no_file "$HOME/.local/bin/mc"
+}
+
 # --- INI editing -------------------------------------------------------------
 test_ini_edits_touch_only_their_section() {
   (
@@ -465,7 +501,7 @@ test_ini_keeps_backslashes_and_mode() {
 # --- AWS: enable, credential_process, disable -------------------------------
 test_aws_enable_seals_plaintext_profiles() {
   aws_env; seed_credentials
-  run_out "$ROOT/bin/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws --yes
   assert_rc 0
   assert_out "Sealed AWS profile prod"
   assert_out "Sealed AWS profile other"
@@ -482,9 +518,9 @@ test_aws_enable_seals_plaintext_profiles() {
 
 test_aws_enable_is_repeatable() {
   aws_env; seed_credentials
-  run_out "$ROOT/bin/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws --yes
   assert_rc 0
-  run_out "$ROOT/bin/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws --yes
   assert_rc 0
   assert_in "$AWS_CONFIG_FILE" "credential_process"
   [[ "$(grep -c 'credential_process' "$AWS_CONFIG_FILE")" == 2 ]] || fail "credential_process duplicated"
@@ -492,7 +528,7 @@ test_aws_enable_is_repeatable() {
 
 test_aws_credential_process_prints_json_only() {
   aws_env; seed_credentials
-  run_out "$ROOT/bin/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws --yes
   run_out "$ROOT/bin/s3seal" credential-process aws prod
   assert_rc 0
   [[ "$(printf '%s\n' "$OUT" | wc -l | tr -d " ")" == 1 ]] || fail "stdout is not a single line: $OUT"
@@ -503,7 +539,7 @@ test_aws_credential_process_prints_json_only() {
 
 test_aws_passthrough_leaves_keys_out_of_args() {
   aws_env; seed_credentials
-  run_out "$ROOT/bin/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws --yes
   run_out "$HOME/.local/bin/aws" --profile prod s3 ls
   assert_rc 0
   assert_aws_log "AWS: [--profile] [prod] [s3] [ls]"
@@ -528,7 +564,7 @@ test_aws_set_secret_seals_then_completes() {
 
 test_aws_configure_get_reads_store() {
   aws_env; seed_credentials
-  run_out "$ROOT/bin/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws --yes
   run_out "$ROOT/bin/aws" configure get aws_secret_access_key --profile prod
   assert_rc 0
   [[ "$OUT" == "SKPROD/1+x" ]] || fail "got: $OUT"
@@ -559,7 +595,7 @@ test_aws_import_is_sealed() {
 
 test_aws_disable_restores_plaintext() {
   aws_env; seed_credentials
-  run_out "$ROOT/bin/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws --yes
   run_out "$ROOT/bin/s3seal" disable aws --yes
   assert_rc 0
   assert_out "Unsealed AWS profile prod"
@@ -570,18 +606,19 @@ test_aws_disable_restores_plaintext() {
   assert_no_file "$HOME/.local/bin/aws"
 }
 
-test_aws_disable_requires_confirmation() {
+test_aws_disable_without_terminal_keeps_sealed() {
   command -v setsid >/dev/null 2>&1 || return 0
   aws_env; seed_credentials
-  run_out "$ROOT/bin/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws --yes
   OUT="$(setsid "$TEST_BASH" "$ROOT/bin/s3seal" disable aws < /dev/null 2>&1)" && RC=0 || RC=$?
-  assert_rc 1; assert_out "pass --yes"
+  assert_rc 0; assert_out "Left 2 credential(s) sealed"
   assert_file "$S3SEAL_CONFIG_DIR/aws/prod.secret.asc"
+  assert_not_in "$AWS_SHARED_CREDENTIALS_FILE" AKPROD1
 }
 
 test_aws_status_reports_plaintext() {
   aws_env; seed_credentials
-  run_out "$ROOT/bin/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws --yes
   printf '[late]\naws_access_key_id = AKLATE\naws_secret_access_key = SKLATE\n' >> "$AWS_SHARED_CREDENTIALS_FILE"
   run_out "$ROOT/bin/s3seal" status
   assert_out "sealed:     prod"
@@ -591,7 +628,7 @@ test_aws_status_reports_plaintext() {
 test_aws_enable_without_cli_fails() {
   aws_env; seed_credentials
   rm -f "$T/bin/aws"
-  run_out "$ROOT/bin/s3seal" enable aws
+  run_out "$ROOT/bin/s3seal" enable aws --yes
   assert_rc 1
   assert_in "$AWS_SHARED_CREDENTIALS_FILE" "AKPROD1"
 }
@@ -626,7 +663,7 @@ test_install_then_enable_aws_end_to_end() {
   aws_env; seed_credentials
   OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" || fail "install failed: $OUT"
   export PATH="$HOME/.local/bin:$PATH"
-  run_out "$HOME/.local/bin/s3seal" enable aws
+  run_out "$HOME/.local/bin/s3seal" enable aws --yes
   assert_rc 0
   assert_out "Sealed AWS profile prod"
   run_out "$HOME/.local/bin/s3seal" disable aws --yes
@@ -719,7 +756,7 @@ test_uninstall_refuses_while_aws_is_sealed() {
   install_env
   aws_env; seed_credentials
   "$TEST_BASH" "$ROOT/install.sh" >/dev/null 2>&1 || fail "install failed"
-  run_out "$HOME/.local/share/s3seal/bin/s3seal" enable aws
+  run_out "$HOME/.local/share/s3seal/bin/s3seal" enable aws --yes
   OUT="$("$TEST_BASH" "$ROOT/uninstall.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 1; assert_out "Run \"s3seal disable aws\" first"
   assert_file "$HOME/.local/share/s3seal/bin/s3seal"

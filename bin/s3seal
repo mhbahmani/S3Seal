@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 #
-# s3seal: turn sealing on or off for a tool, and show its state.
+# s3seal: turn sealing on or off for a client, move its credentials between
+# plaintext and encrypted storage, and show the state.
 #
-#   s3seal enable aws
-#   s3seal disable aws [--yes]
+#   s3seal enable  aws|mc [--yes | --no-migrate]
+#   s3seal disable aws|mc [--yes | --no-migrate]
+#   s3seal migrate aws|mc [--to plain]
 #   s3seal status
+#   s3seal upgrade [--check] [--force]
 #
 # "credential-process" is called by the AWS CLI, not by users.
 set -euo pipefail
@@ -24,62 +27,193 @@ S3SEAL_HOME="$(cd "$(dirname "$_self")/.." && pwd)"
 . "$S3SEAL_HOME/lib/ini.sh"
 # shellcheck source=lib/aws.sh
 . "$S3SEAL_HOME/lib/aws.sh"
+# shellcheck source=lib/mc.sh
+. "$S3SEAL_HOME/lib/mc.sh"
 
 BIN_DIR="${S3SEAL_INSTALL_DIR:-$HOME/.local/bin}"
+CLIENTS="aws mc"
 
 bin_path() { printf '%s/%s' "$BIN_DIR" "$1"; }
 
+linked() { [[ -L "$(bin_path "$1")" && "$(readlink "$(bin_path "$1")")" == "$S3SEAL_HOME/bin/$1" ]]; }
+
 # Link ~/.local/bin/NAME to our entry point, unless something else is there.
 link_entry() {
-  local target; target="$(bin_path "$1")"
-  if [[ -L "$target" && "$(readlink "$target")" == "$S3SEAL_HOME/bin/$1" ]]; then return 0; fi
-  [[ ! -e "$target" && ! -L "$target" ]] \
-    || die "$target exists and is not a s3seal link; move it aside first"
+  linked "$1" && return 0
+  [[ ! -e "$(bin_path "$1")" && ! -L "$(bin_path "$1")" ]] \
+    || die "$(bin_path "$1") exists and is not an s3seal link; move it aside first"
   mkdir -p "$BIN_DIR"
-  ln -s "$S3SEAL_HOME/bin/$1" "$target"
+  ln -s "$S3SEAL_HOME/bin/$1" "$(bin_path "$1")"
 }
 
 unlink_entry() {
-  local target; target="$(bin_path "$1")"
-  if [[ -L "$target" && "$(readlink "$target")" == "$S3SEAL_HOME/bin/$1" ]]; then rm -f "$target"; fi
+  if linked "$1"; then rm -f "$(bin_path "$1")"; fi
 }
 
-cmd_enable_aws() {
-  find_real aws >/dev/null || die "the AWS CLI is not installed or not on PATH"
-  aws_enable
-  link_entry aws
-  if [[ "$(command -v aws 2>/dev/null || true)" != "$(bin_path aws)" ]]; then
-    warn "'aws' does not resolve to the sealed shim yet: put $BIN_DIR before the AWS CLI's directory on PATH"
-  fi
-  printf 'aws is sealed. Keys entered with "aws configure" are stored encrypted.\n'
+supported() {
+  case "$1" in
+    aws|mc) ;;
+    *) die "unknown client '$1'; supported clients: $CLIENTS" ;;
+  esac
 }
 
-cmd_disable_aws() {
-  local flag="${1-}" answer=''
-  if [[ "$flag" != --yes ]]; then
-    have_tty || die "refusing to write plaintext keys without a terminal; pass --yes"
-    prompt_tty answer "This writes every sealed AWS key back to $AWS_CREDS in plaintext. Type 'yes' to continue: "
-    [[ "$answer" == yes ]] || die "aborted; nothing changed"
+# Makes sure the client exists, and remembers where it is.
+preflight() {
+  case "$1" in
+    aws)
+      find_real aws >/dev/null || die "the AWS CLI is not installed or not on PATH" ;;
+    mc)
+      need_mc ;;
+  esac
+}
+
+need_mc() {
+  MC_REAL="$(mc_real_binary)" || die "the MinIO client (mc) is not installed or not found. Set MC_BIN."
+  mkdir -p "$CONFIG_DIR"
+  printf '%s\n' "$MC_REAL" > "$CONFIG_DIR/mc-path"
+}
+
+# Names of credentials still in plaintext, one per line.
+plain_names() {
+  case "$1" in
+    aws) aws_plaintext_profiles ;;
+    mc) need_mc; mc_plaintext_aliases | while IFS= read -r l; do json_field "$l" alias; done ;;
+  esac
+}
+
+# Names of credentials in the encrypted store, one per line.
+sealed_names() {
+  case "$1" in
+    aws) aws_sealed_profiles ;;
+    mc) mc_sealed_aliases ;;
+  esac
+}
+
+to_sealed() {
+  case "$1" in
+    aws) aws_enable ;;
+    mc) need_mc; mc_seal_all ;;
+  esac
+}
+
+to_plain() {
+  case "$1" in
+    aws) aws_disable ;;
+    mc) mc_unseal_all ;;
+  esac
+}
+
+# Steps the user can do by hand when they decline the automatic migration.
+manual_sealed() {
+  case "$1" in
+    aws)
+      printf '  aws configure --profile NAME   re-enter the keys; they are stored encrypted\n' ;;
+    mc)
+      printf '  mc alias set NAME URL          asks for the keys; stored encrypted\n'
+      printf '  %s alias remove NAME   removes the plaintext copy\n' "$MC_REAL" ;;
+  esac
+}
+
+# Asks before moving credentials. --yes migrates, --no-migrate skips, and with
+# no terminal nothing is moved.
+confirm_migrate() {  # QUESTION FLAG
+  case "$2" in
+    --yes) return 0 ;;
+    --no-migrate) return 1 ;;
+  esac
+  have_tty || { warn "no terminal to ask; not migrating (pass --yes to migrate now)"; return 1; }
+  local answer=''
+  prompt_tty answer "$1? [y/N]: "
+  [[ "$answer" == y || "$answer" == Y || "$answer" == yes ]]
+}
+
+count_lines() { grep -c . || true; }
+
+cmd_enable() {  # TOOL [FLAG]
+  local tool="$1" flag="${2-}" count
+  supported "$tool"
+  preflight "$tool"
+  link_entry "$tool"
+  count="$(plain_names "$tool" | count_lines)"
+  if (( count == 0 )); then
+    printf 'No plaintext %s credentials to migrate.\n' "$tool"
+  elif confirm_migrate "Migrate $count $tool credential(s) to encrypted storage now" "$flag"; then
+    to_sealed "$tool"
+  else
+    printf 'Left %s credential(s) in plaintext. To migrate them later, run:\n  s3seal migrate %s\n' "$count" "$tool"
+    printf 'Or do it by hand:\n'
+    manual_sealed "$tool"
   fi
-  aws_disable
-  unlink_entry aws
-  printf 'aws is no longer sealed.\n'
+  if [[ "$(command -v "$tool" 2>/dev/null || true)" != "$(bin_path "$tool")" ]]; then
+    warn "'$tool' does not resolve to the s3seal link yet: put $BIN_DIR before the other $tool on PATH"
+  fi
+  printf '%s is sealed.\n' "$tool"
+}
+
+cmd_disable() {  # TOOL [FLAG]
+  local tool="$1" flag="${2-}" count
+  supported "$tool"
+  count="$(sealed_names "$tool" | count_lines)"
+  if (( count > 0 )); then
+    preflight "$tool"
+    if confirm_migrate "Restore $count $tool credential(s) to plaintext now" "$flag"; then
+      to_plain "$tool"
+    else
+      printf 'Left %s credential(s) sealed. To restore them later, run:\n  s3seal migrate %s --to plain\n' "$count" "$tool"
+    fi
+  fi
+  unlink_entry "$tool"
+  printf '%s is no longer sealed.\n' "$tool"
+}
+
+cmd_migrate() {  # TOOL [--to plain|sealed]
+  local tool="$1" to=sealed count
+  shift
+  supported "$tool"
+  while (( $# )); do
+    case "$1" in
+      --to) to="${2-}"; shift 2 ;;
+      *) die "unknown option '$1' for migrate" ;;
+    esac
+  done
+  preflight "$tool"
+  if [[ "$to" == sealed ]]; then
+    count="$(plain_names "$tool" | count_lines)"
+    if (( count == 0 )); then printf 'Nothing to migrate for %s.\n' "$tool"; return 0; fi
+    to_sealed "$tool"
+  elif [[ "$to" == plain ]]; then
+    count="$(sealed_names "$tool" | count_lines)"
+    if (( count == 0 )); then printf 'Nothing to migrate for %s.\n' "$tool"; return 0; fi
+    to_plain "$tool"
+  else
+    die "--to takes 'plain' or 'sealed'"
+  fi
 }
 
 cmd_status() {
-  local p
-  printf 'aws:\n'
-  if [[ -L "$(bin_path aws)" && "$(readlink "$(bin_path aws)")" == "$S3SEAL_HOME/bin/aws" ]]; then
-    printf '  shim:       on\n'
-  else
-    printf '  shim:       off\n'
-  fi
-  while IFS= read -r p; do
-    [[ -n "$p" ]] && printf '  sealed:     %s\n' "$p"
-  done <<< "$(aws_sealed_profiles)"
-  while IFS= read -r p; do
-    [[ -n "$p" ]] && printf '  PLAINTEXT:  %s (run: s3seal enable aws)\n' "$p"
-  done <<< "$(aws_plaintext_profiles)"
+  local tool p
+  for tool in $CLIENTS; do
+    printf '%s:\n' "$tool"
+    if linked "$tool"; then printf '  link:       on\n'; else printf '  link:       off\n'; fi
+    while IFS= read -r p; do
+      [[ -n "$p" ]] && printf '  sealed:     %s\n' "$p"
+    done <<< "$(sealed_names "$tool")"
+    while IFS= read -r p; do
+      [[ -n "$p" ]] && printf '  PLAINTEXT:  %s (run: s3seal migrate %s)\n' "$p" "$tool"
+    done <<< "$(plain_names "$tool" 2>/dev/null || true)"
+  done
+}
+
+usage() {
+  cat <<EOF
+usage:
+  s3seal enable  aws|mc [--yes | --no-migrate]
+  s3seal disable aws|mc [--yes | --no-migrate]
+  s3seal migrate aws|mc [--to plain]
+  s3seal status
+  s3seal upgrade [--check] [--force]
+  s3seal --version
+EOF
 }
 
 cmd_upgrade() {
@@ -121,24 +255,16 @@ cmd_upgrade() {
     S3SEAL_INSTALL_DIR="$BIN_DIR" S3SEAL_CONFIG_DIR="$CONFIG_DIR" bash "$tmp/install.sh"
 }
 
-usage() {
-  cat <<EOF
-usage:
-  s3seal enable aws
-  s3seal disable aws [--yes]
-  s3seal status
-  s3seal upgrade [--check] [--force]
-  s3seal --version
-EOF
-}
-
 case "${1-}" in
   enable)
-    [[ "${2-}" == aws ]] || die "only 'aws' can be enabled so far"
-    cmd_enable_aws ;;
+    [[ -n "${2-}" ]] || die "usage: s3seal enable aws|mc [--yes | --no-migrate]"
+    cmd_enable "$2" "${3-}" ;;
   disable)
-    [[ "${2-}" == aws ]] || die "only 'aws' can be disabled so far"
-    cmd_disable_aws "${3-}" ;;
+    [[ -n "${2-}" ]] || die "usage: s3seal disable aws|mc [--yes | --no-migrate]"
+    cmd_disable "$2" "${3-}" ;;
+  migrate)
+    [[ -n "${2-}" ]] || die "usage: s3seal migrate aws|mc [--to plain]"
+    shift; cmd_migrate "$@" ;;
   status) cmd_status ;;
   upgrade) shift; cmd_upgrade "$@" ;;
   credential-process)
