@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# sealedmc: a drop-in wrapper around the MinIO client (mc) that keeps
+# s3seal: a drop-in wrapper around the MinIO client (mc) that keeps
 # credentials in per-alias GPG-encrypted files instead of plaintext in
 # ~/.mc/config.json.
 #
@@ -8,19 +8,19 @@
 # process. They are never written to disk unencrypted, never passed in
 # argv, and never stored in shell history.
 #
-# https://github.com/mhbahmani/sealedmc
+# https://github.com/mhbahmani/s3seal
 
 set -euo pipefail
 
 VERSION="1.1.0"
 
-CONFIG_DIR="${SEALEDMC_CONFIG_DIR:-$HOME/.config/sealedmc}"
+CONFIG_DIR="${S3SEAL_CONFIG_DIR:-$HOME/.config/s3seal}"
 STORE="$CONFIG_DIR/aliases"
 RECIPIENT_FILE="$CONFIG_DIR/recipient"
 MC_PATH_FILE="$CONFIG_DIR/mc-path"
 
-die() { printf 'sealedmc: %s\n' "$*" >&2; exit 1; }
-warn() { printf 'sealedmc: %s\n' "$*" >&2; }
+die() { printf 's3seal: %s\n' "$*" >&2; exit 1; }
+warn() { printf 's3seal: %s\n' "$*" >&2; }
 
 # ---------------------------------------------------------------------------
 # Locate the real mc binary.
@@ -85,13 +85,13 @@ find_mc_binary() {
   return 1
 }
 
-if [[ -n "${SEALEDMC_ACTIVE:-}" ]]; then
+if [[ -n "${S3SEAL_ACTIVE:-}" ]]; then
   die "recursion detected: the resolved mc binary is this wrapper. Set MC_BIN to the real mc."
 fi
 
 # Exported before probing candidates, so that running another copy of this
 # wrapper with --version fails instead of recursing.
-export SEALEDMC_ACTIVE=1
+export S3SEAL_ACTIVE=1
 
 MC_REAL="$(find_mc_binary)" || die "cannot find the real MinIO client binary.
 Set MC_BIN, or write its absolute path to $MC_PATH_FILE"
@@ -113,13 +113,13 @@ store_path() { printf '%s/%s.url.asc' "$STORE" "$1"; }
 
 recipient() {
   local r=''
-  if [[ -n "${SEALEDMC_GPG_RECIPIENT:-}" ]]; then
-    r="$SEALEDMC_GPG_RECIPIENT"
+  if [[ -n "${S3SEAL_GPG_RECIPIENT:-}" ]]; then
+    r="$S3SEAL_GPG_RECIPIENT"
   elif [[ -r "$RECIPIENT_FILE" ]]; then
     r="$(tr -d '[:space:]' < "$RECIPIENT_FILE")"
   fi
   [[ -n "$r" ]] || die "no GPG recipient configured.
-Set SEALEDMC_GPG_RECIPIENT, or write a key id / email to $RECIPIENT_FILE"
+Set S3SEAL_GPG_RECIPIENT, or write a key id / email to $RECIPIENT_FILE"
   printf '%s' "$r"
 }
 
@@ -138,10 +138,10 @@ check_key() {
 # gpg's own diagnostics are shown only when something goes wrong.
 run_gpg() {
   local errf rc=0
-  errf="$(mktemp "${TMPDIR:-/tmp}/sealedmc.XXXXXX")"
+  errf="$(mktemp "${TMPDIR:-/tmp}/s3seal.XXXXXX")"
   gpg "$@" 2>"$errf" || rc=$?
-  if (( rc )) || [[ -n "${SEALEDMC_DEBUG:-}" ]]; then
-    sed 's/^/sealedmc: /' "$errf" >&2
+  if (( rc )) || [[ -n "${S3SEAL_DEBUG:-}" ]]; then
+    sed 's/^/s3seal: /' "$errf" >&2
   fi
   rm -f "$errf"
   return "$rc"
@@ -290,13 +290,13 @@ cmd_alias_set() {
   host="${host%%/*}"
   full="$scheme://$ak:$sk@$host"
 
-  if [[ -z "${SEALEDMC_NO_VERIFY:-}" ]]; then
+  if [[ -z "${S3SEAL_NO_VERIFY:-}" ]]; then
     local probe_flags=() f
     for f in ${MC_FLAGS[@]+"${MC_FLAGS[@]}"}; do
       [[ "$f" == "--insecure" ]] && probe_flags+=("$f")
     done
-    if MC_HOST_sealedmcprobe="$full" "$MC_REAL" ${probe_flags[@]+"${probe_flags[@]}"} \
-         ls sealedmcprobe/ >/dev/null 2>&1; then
+    if MC_HOST_s3sealprobe="$full" "$MC_REAL" ${probe_flags[@]+"${probe_flags[@]}"} \
+         ls s3sealprobe/ >/dev/null 2>&1; then
       printf 'Verified connection to %s://%s\n' "$scheme" "$host"
     else
       warn "warning: could not list buckets with these credentials (storing anyway)"
@@ -321,7 +321,7 @@ cmd_alias_list() {
     [[ -e "$f" ]] || continue
     found=1
     n="${f##*/}"; n="${n%.url.asc}"
-    if [[ -n "${SEALEDMC_LIST_ENDPOINTS:-}" ]]; then
+    if [[ -n "${S3SEAL_LIST_ENDPOINTS:-}" ]]; then
       url="$(decrypt_alias "$n")"
       printf '%-20s %s://%s\n' "$n" "${url%%://*}" "${url##*@}"
     else
@@ -408,7 +408,7 @@ alias_main() {
     migrate)
       cmd_alias_migrate "$@" ;;
     *)
-      die "unsupported: 'mc alias ${sub}'. sealedmc handles set, remove, list and migrate." ;;
+      die "unsupported: 'mc alias ${sub}'. s3seal handles set, remove, list and migrate." ;;
   esac
 }
 
@@ -416,8 +416,8 @@ alias_main() {
 # Dispatch
 # ---------------------------------------------------------------------------
 
-if [[ "${1:-}" == "--sealedmc-version" ]]; then
-  printf 'sealedmc %s (wrapping %s)\n' "$VERSION" "$MC_REAL"
+if [[ "${1:-}" == "--s3seal-version" ]]; then
+  printf 's3seal %s (wrapping %s)\n' "$VERSION" "$MC_REAL"
   exit 0
 fi
 

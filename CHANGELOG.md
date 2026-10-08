@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Renamed
+
+- The project is now s3seal (was sealedmc). Store path is `~/.config/s3seal`,
+  environment variables use `S3SEAL_`. Credentials stored under sealedmc's
+  path are not migrated automatically.
+
+### Added
+
+- `s3seal enable aws` / `disable aws` / `status`: AWS profiles keep their keys
+  encrypted and are fetched through `credential_process`.
+- An `aws` shim handles `aws configure` (interactive and set/get of key
+  fields) and `aws configure import`; every other command runs the real CLI.
+- `lib/` with shared helpers, a minimal INI editor, and the AWS support.
+- Installed files are verified one by one against checksums.
+
+### Changed
+
+- `uninstall.sh` refuses while AWS profiles are sealed.
+- The installer no longer touches the AWS CLI; it installs the commands only.
+
 ## 1.1.0
 
 ### Fixed
@@ -27,7 +49,7 @@
 - The installer verifies the downloaded wrapper's SHA-256.
 - `uninstall.sh --purge` asks for confirmation (`--yes` to skip).
 - gpg diagnostics are shown when encryption or decryption fails;
-  `SEALEDMC_DEBUG=1` always shows them.
+  `S3SEAL_DEBUG=1` always shows them.
 - Test suite, shellcheck and CI on Linux and macOS.
 
 ## 1.0.0
