@@ -10,8 +10,31 @@ INSTALL_DIR="${SEALEDMC_INSTALL_DIR:-$HOME/.local/bin}"
 CONFIG_DIR="${SEALEDMC_CONFIG_DIR:-$HOME/.config/sealedmc}"
 TARGET="$INSTALL_DIR/mc"
 PURGE=0
+ASSUME_YES=0
 
-[[ "${1:-}" == "--purge" ]] && PURGE=1
+for arg in "$@"; do
+  case "$arg" in
+    --purge) PURGE=1 ;;
+    -y|--yes) ASSUME_YES=1 ;;
+    -h|--help)
+      printf 'usage: uninstall.sh [--purge [--yes]]\n'; exit 0 ;;
+    *) printf 'unknown option: %s\n' "$arg" >&2; exit 2 ;;
+  esac
+done
+
+# Purging deletes every stored credential, so it has to be confirmed.
+if (( PURGE && ! ASSUME_YES )); then
+  if ! { : < /dev/tty; } 2>/dev/null; then
+    printf 'Refusing to purge without a terminal to confirm; pass --yes.\n' >&2
+    exit 1
+  fi
+  printf 'This permanently deletes %s, including every encrypted alias.\n' "$CONFIG_DIR" > /dev/tty
+  read -r -p 'Type "purge" to continue: ' answer < /dev/tty
+  if [[ "$answer" != purge ]]; then
+    printf 'Aborted; nothing was removed.\n'
+    exit 1
+  fi
+fi
 
 if [[ -f "$TARGET" ]] && grep -q '^# sealedmc:' "$TARGET" 2>/dev/null; then
   rm -f "$TARGET"
