@@ -3,7 +3,7 @@
 #   printf 'PROMPT\tANSWER\n...' | pty_drive.py CMD [ARGS...]
 # Waits for each PROMPT in the output, sends ANSWER and a newline, then prints
 # everything the program wrote and exits with its status.
-import os, pty, sys
+import os, pty, sys, time
 
 steps = [line.rstrip("\n").split("\t", 1) for line in sys.stdin if line.strip()]
 pid, fd = pty.fork()
@@ -26,6 +26,8 @@ for step in steps:
     while prompt.encode() not in buf:
         if not fill():
             break
+    # Give the program time to switch the tty to no-echo before answering.
+    time.sleep(0.3)
     os.write(fd, answer.encode() + b"\n")
 while fill():
     pass
