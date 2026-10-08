@@ -9,9 +9,15 @@
 
 set -euo pipefail
 
-REPO="${SEALEDMC_REPO:-mhbahmani/sealedmc}"
-REF="${SEALEDMC_REF:-master}"
+DEFAULT_REPO="mhbahmani/sealedmc"
+DEFAULT_REF="master"
+REPO="${SEALEDMC_REPO:-$DEFAULT_REPO}"
+REF="${SEALEDMC_REF:-$DEFAULT_REF}"
 RAW_URL="https://raw.githubusercontent.com/$REPO/$REF/mc"
+
+# SHA-256 of the wrapper this installer was released with. Updated by
+# scripts/update-checksum.sh; the test suite fails if it is stale.
+WRAPPER_SHA256="74edf47dae3fca6be29c3e08eaf8e2f2a79bfa847797a47c2bfd959c1bdbed2d"
 
 INSTALL_DIR="${SEALEDMC_INSTALL_DIR:-$HOME/.local/bin}"
 LIBEXEC_DIR="${SEALEDMC_LIBEXEC_DIR:-$HOME/.local/libexec}"
@@ -32,6 +38,14 @@ fail()  { printf '%s✗%s %s\n' "$E" "$R" "$*" >&2; }
 # On many Linux distributions "mc" is Midnight Commander, not MinIO's client.
 is_minio_mc() { "$1" --version 2>/dev/null | grep -q 'RELEASE\.'; }
 is_wrapper()  { grep -q '^# sealedmc:' "$1" 2>/dev/null; }
+
+sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
 
 mc_download_url() {
   local os arch
@@ -179,6 +193,25 @@ else
   command -v curl >/dev/null 2>&1 || { fail "curl is required to download the wrapper"; exit 1; }
   curl -fsSL "$RAW_URL" -o "$tmp" || { fail "download failed: $RAW_URL"; exit 1; }
   ok "downloaded the wrapper from $REPO@$REF"
+
+  # The embedded checksum describes the wrapper at the default ref only.
+  expected="${SEALEDMC_SHA256:-}"
+  if [[ -z "$expected" && "$REPO" == "$DEFAULT_REPO" && "$REF" == "$DEFAULT_REF" ]]; then
+    expected="$WRAPPER_SHA256"
+  fi
+  if [[ -n "$expected" ]]; then
+    actual="$(sha256 "$tmp")"
+    if [[ "$actual" != "$expected" ]]; then
+      fail "checksum mismatch for the downloaded wrapper"
+      info "    expected $expected"
+      info "    got      $actual"
+      info "Refusing to install. Set SEALEDMC_SHA256 if you are installing another ref on purpose."
+      exit 1
+    fi
+    ok "verified wrapper checksum"
+  else
+    warn "no checksum to verify $REPO@$REF against (set SEALEDMC_SHA256 to check it)"
+  fi
 fi
 
 head -n1 "$tmp" | grep -q '^#!' || { fail "downloaded file does not look like a script"; exit 1; }
