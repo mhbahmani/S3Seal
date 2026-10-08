@@ -87,6 +87,7 @@ BANNER
 
 # --- dependencies ----------------------------------------------------------
 missing=()
+# shellcheck disable=SC2043  # one dependency today; the list may grow
 for dep in gpg; do
   command -v "$dep" >/dev/null 2>&1 || missing+=("$dep")
 done
@@ -252,6 +253,7 @@ if (( ! path_ok )); then
     *) rcfile="$HOME/.bashrc  (or ~/.zshrc)" ;;
   esac
   if [[ "$INSTALL_DIR" == "$HOME/.local/bin" ]]; then
+    # shellcheck disable=SC2016  # printed for the user's rc file, unexpanded
     path_line='export PATH=$PATH:$HOME/.local/bin'
   else
     path_line="export PATH=\$PATH:$INSTALL_DIR"
