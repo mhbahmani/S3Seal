@@ -303,6 +303,11 @@ case "$state" in
   upgrade) info "Upgrading s3seal $installed_version -> $new_version." ;;
 esac
 
+# Older installs kept the program files directly in libexec/ (and libexec/s3seal
+# was a file). Remove those s3seal copies so the current layout can take their place.
+for old in "$SHARE_DIR/libexec/mc" "$SHARE_DIR/libexec/aws" "$SHARE_DIR/libexec/s3seal"; do
+  if [[ -f "$old" && ! -L "$old" ]] && is_wrapper "$old"; then rm -f "$old"; fi
+done
 mkdir -p "$SHARE_DIR/libexec/s3seal" "$SHARE_DIR/lib" "$BIN_DIR"
 if [[ "$state" != same ]]; then
   for f in "${changed[@]}"; do

@@ -764,6 +764,17 @@ test_install_ignores_midnight_commander() {
   assert_not_out "Protect"
 }
 
+test_install_replaces_old_layout_file() {
+  install_env
+  mkdir -p "$HOME/.local/share/s3seal/libexec"
+  printf '#!/bin/sh\n# s3seal: old layout\n' > "$HOME/.local/share/s3seal/libexec/s3seal"
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  [[ -f "$HOME/.local/share/s3seal/libexec/s3seal/s3seal" ]] || fail "current layout not installed"
+  OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0; assert_out "already installed and up to date"
+}
+
 test_install_twice_is_idempotent() {
   install_env
   OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
