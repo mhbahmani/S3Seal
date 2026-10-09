@@ -490,14 +490,24 @@ if [[ -z "${S3SEAL_UPGRADE:-}" ]]; then
 fi
 
 # --- summary -----------------------------------------------------------------
-info ""
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *) warn "$BIN_DIR is not on your PATH. Add this to your shell rc file and start a new shell:"
-     info "    export PATH=\$PATH:$BIN_DIR" ;;
-esac
 step "Status"
 "$SHARE_DIR/libexec/s3seal" status >&2 || true
+
+# One note for the whole install: the commands folder must come first on PATH.
+case ":$PATH:" in
+  "$BIN_DIR:"*) ;;
+  *)
+    case "${SHELL:-}" in
+      */zsh) rc="$HOME/.zshrc" ;;
+      */bash) rc="$HOME/.bashrc" ;;
+      *) rc="$HOME/.profile" ;;
+    esac
+    info ""
+    warn "To use s3seal's mc and aws, add this line to $rc, then open a new shell:"
+    info ""
+    info "    export PATH=\"${BIN_DIR/#$HOME/\$HOME}:\$PATH\""
+    info "" ;;
+esac
 
 step "Getting started"
 info "add a mc alias      mc alias set NAME URL      keys are stored encrypted"

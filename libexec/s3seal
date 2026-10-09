@@ -155,9 +155,6 @@ cmd_enable() {  # TOOL [FLAG]
     printf 'Or do it by hand:\n'
     manual_sealed "$tool"
   fi
-  if [[ "$(command -v "$tool" 2>/dev/null || true)" != "$(bin_path "$tool")" ]]; then
-    printf 'note: %s must come first on your PATH for %s to use s3seal\n' "$BIN_DIR" "$tool" >&2
-  fi
   printf '%s is sealed.\n' "$tool"
 }
 
