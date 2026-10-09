@@ -11,8 +11,6 @@
 set -euo pipefail
 
 DEFAULT_REPO="mhbahmani/s3seal"
-# The release this installer belongs to. Set to the tag at each release.
-DEFAULT_REF="v1.2.0"
 
 DEV=0
 for arg in "$@"; do
@@ -26,9 +24,28 @@ for arg in "$@"; do
 done
 
 REPO="${S3SEAL_REPO:-$DEFAULT_REPO}"
-REF="${S3SEAL_REF:-$DEFAULT_REF}"
-if (( DEV )); then REF=master; fi
-RAW_URL="https://raw.githubusercontent.com/$REPO/$REF"
+
+# The newest published release. A repository without releases falls back to its
+# newest tag. Prints nothing when neither exists.
+latest_release() {  # REPO
+  local tag
+  tag="$(curl -fsSL "https://api.github.com/repos/$1/releases/latest" 2>/dev/null \
+    | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)"
+  if [[ -z "$tag" ]]; then
+    tag="$(curl -fsSL "https://api.github.com/repos/$1/tags" 2>/dev/null \
+      | sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' | sort -V | tail -n1)"
+  fi
+  printf '%s' "$tag"
+}
+
+# Which version to download. Resolved only when the files come from GitHub.
+if (( DEV )); then
+  REF=master
+elif [[ -n "${S3SEAL_REF:-}" ]]; then
+  REF="$S3SEAL_REF"
+else
+  REF=""
+fi
 
 CONFIG_DIR="${S3SEAL_CONFIG_DIR:-$HOME/.config/s3seal}"
 
@@ -240,11 +257,19 @@ if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
 fi
 
 if [[ -n "$script_dir" && -f "$script_dir/libexec/mc" && -f "$script_dir/lib/common.sh" ]]; then
+  REF="${REF:-checkout}"
   info "Copying s3seal from this checkout..."
   for f in $FILES; do cp "$script_dir/$f" "$stage/$f"; done
 else
   step "Download"
-  info "from $REPO@$REF"
+  if [[ -z "$REF" ]]; then
+    command -v curl >/dev/null 2>&1 || fail "curl is required to download s3seal"
+    REF="$(latest_release "$REPO")"
+    [[ -n "$REF" ]] || fail "no release found for $REPO; use --dev to install master"
+  fi
+  if (( DEV )); then info_release="development build from master"; else info_release="release $REF"; fi
+  RAW_URL="https://raw.githubusercontent.com/$REPO/$REF"
+  info "$info_release from $REPO"
   for f in $FILES; do
     curl -fsSL "$RAW_URL/$f" -o "$stage/$f" || fail "download failed: $RAW_URL/$f"
   done
@@ -288,10 +313,10 @@ else
 fi
 
 case "$state" in
-  fresh)   info "Installing s3seal $new_version." ;;
+  fresh)   info "Installing s3seal $new_version ($REF)." ;;
   same)    ok "s3seal $new_version is already installed and up to date." ;;
-  refresh) info "s3seal $new_version is already installed. Refreshing ${#changed[@]} changed file(s)." ;;
-  upgrade) info "Upgrading s3seal $installed_version -> $new_version." ;;
+  refresh) info "s3seal $new_version ($REF) is already installed. Refreshing ${#changed[@]} changed file(s)." ;;
+  upgrade) info "Upgrading s3seal $installed_version -> $new_version ($REF)." ;;
 esac
 
 # A libexec/s3seal folder left by an older layout would block the program file.
