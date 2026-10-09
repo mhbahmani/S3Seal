@@ -86,6 +86,7 @@ setup() {
   export S3SEAL_CONFIG_DIR="$HOME/.config/s3seal"
   export S3SEAL_GPG_RECIPIENT="test@s3seal.invalid"
   export S3SEAL_NO_VERIFY=1
+  export S3SEAL_GNUPGHOME="$GNUPGHOME"
   export MC_BIN="$FAKE_MC"
   export FAKE_MC_LOG="$T/mc.log"
   export FAKE_MC_CONFIG="$T/config.jsonl"
@@ -485,6 +486,19 @@ test_status_lists_names_comma_separated() {
   run_out "$ROOT/libexec/s3seal" status
   assert_out "PLAINTEXT:  prod, temp, other (run: s3seal migrate aws)"
   assert_out "enabled:    no"
+}
+
+test_gpg_home_caches_passphrase_for_five_minutes() {
+  (
+    S3SEAL_HOME="$ROOT"; export S3SEAL_HOME
+    S3SEAL_GNUPGHOME="$T/s3gnupg"; export S3SEAL_GNUPGHOME
+    # shellcheck source=/dev/null
+    . "$ROOT/lib/common.sh"
+    ensure_gpg_home
+  )
+  assert_in "$T/s3gnupg/gpg-agent.conf" "default-cache-ttl 300"
+  assert_in "$T/s3gnupg/gpg-agent.conf" "max-cache-ttl 300"
+  [[ "$(stat -c %a "$T/s3gnupg" 2>/dev/null || stat -f %Lp "$T/s3gnupg")" == 700 ]] || fail "GPG home is not 0700"
 }
 
 # --- INI editing -------------------------------------------------------------

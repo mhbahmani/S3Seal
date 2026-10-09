@@ -4,6 +4,21 @@
 
 CONFIG_DIR="${S3SEAL_CONFIG_DIR:-$HOME/.config/s3seal}"
 
+# s3seal keeps its key in a GPG home of its own. That gives the key its own
+# passphrase cache (5 minutes), without changing the cache of the user's keys.
+S3SEAL_GNUPGHOME="${S3SEAL_GNUPGHOME:-$CONFIG_DIR/gnupg}"
+export GNUPGHOME="$S3SEAL_GNUPGHOME"
+
+# Creates the GPG home and its agent settings once. The passphrase stays cached
+# for 5 minutes at most, however often it is used.
+ensure_gpg_home() {
+  [[ -f "$GNUPGHOME/gpg-agent.conf" ]] && return 0
+  mkdir -p "$GNUPGHOME"
+  chmod 700 "$GNUPGHOME"
+  printf 'default-cache-ttl 300\nmax-cache-ttl 300\n' > "$GNUPGHOME/gpg-agent.conf"
+  gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+}
+
 die()  { printf 's3seal: %s\n' "$*" >&2; exit 1; }
 warn() { printf 's3seal: %s\n' "$*" >&2; }
 
@@ -37,6 +52,7 @@ prompt_tty() {
 # gpg diagnostics are shown only on failure, or always with S3SEAL_DEBUG.
 run_gpg() {
   local errf rc=0
+  ensure_gpg_home
   errf="$(mktemp "${TMPDIR:-/tmp}/s3seal.XXXXXX")"
   gpg "$@" 2>"$errf" || rc=$?
   if (( rc )) || [[ -n "${S3SEAL_DEBUG:-}" ]]; then
