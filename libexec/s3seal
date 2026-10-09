@@ -19,7 +19,7 @@ while [[ -L "$_self" ]]; do
   _t="$(readlink "$_self")"
   [[ "$_t" == /* ]] && _self="$_t" || _self="$(dirname "$_self")/$_t"
 done
-S3SEAL_HOME="$(cd "$(dirname "$_self")/../.." && pwd)"
+S3SEAL_HOME="$(cd "$(dirname "$_self")/.." && pwd)"
 
 # shellcheck source=lib/common.sh
 . "$S3SEAL_HOME/lib/common.sh"
@@ -35,7 +35,7 @@ CLIENTS="aws mc"
 
 bin_path() { printf '%s/%s' "$BIN_DIR" "$1"; }
 
-linked() { [[ -L "$(bin_path "$1")" && "$(readlink "$(bin_path "$1")")" == "$S3SEAL_HOME/libexec/s3seal/$1" ]]; }
+linked() { [[ -L "$(bin_path "$1")" && "$(readlink "$(bin_path "$1")")" == "$S3SEAL_HOME/libexec/$1" ]]; }
 
 # Link the command NAME in the bin folder to its entry point. A plain copy left
 # by an older install is replaced; anything else that is there is refused.
@@ -49,7 +49,7 @@ link_entry() {
     rm -f "$target"
   fi
   mkdir -p "$BIN_DIR"
-  ln -s "$S3SEAL_HOME/libexec/s3seal/$1" "$target"
+  ln -s "$S3SEAL_HOME/libexec/$1" "$target"
 }
 
 unlink_entry() {
@@ -241,7 +241,7 @@ cmd_upgrade() {
   # Expanded now: a local variable is gone by the time the EXIT trap runs.
   # shellcheck disable=SC2064  # expanded now on purpose: the local is gone at exit
   trap "rm -rf '$tmp'" EXIT
-  curl -fsSL "https://raw.githubusercontent.com/$repo/$ref/libexec/s3seal/s3seal" -o "$tmp/s3seal" \
+  curl -fsSL "https://raw.githubusercontent.com/$repo/$ref/libexec/s3seal" -o "$tmp/s3seal" \
     || die "cannot fetch $repo@$ref"
   latest="$(sed -n 's/^VERSION="\(.*\)"$/\1/p' "$tmp/s3seal" | head -n1)"
 

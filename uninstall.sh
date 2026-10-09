@@ -41,7 +41,7 @@ BIN_DIR="${S3SEAL_INSTALL_DIR:-$SHARE_DIR/bin}"
 
 for name in mc aws s3seal; do
   target="$BIN_DIR/$name"
-  if [[ -L "$target" && "$(readlink "$target")" == "$SHARE_DIR/libexec/s3seal/$name" ]]; then
+  if [[ -L "$target" && "$(readlink "$target")" == "$SHARE_DIR/libexec/$name" ]]; then
     rm -f "$target"
     printf 'Removed %s\n' "$target"
   fi

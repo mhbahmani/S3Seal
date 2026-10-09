@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck -x libexec/s3seal/* lib/*.sh install.sh uninstall.sh scripts/update-checksum.sh tests/run.sh
+      - run: shellcheck -x libexec/* lib/*.sh install.sh uninstall.sh scripts/update-checksum.sh tests/run.sh
 
   test:
     strategy:
