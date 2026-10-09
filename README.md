@@ -31,13 +31,7 @@ export PATH="$HOME/.local/share/s3seal/bin:$PATH"
 Requirements: `bash`, `gpg`, `curl`. Each client you protect needs its own
 official binary (`mc` or `aws`).
 
-Running the installer again is safe. It reports what it found.
-
-Set your GPG key once, or the installer will ask for it:
-
-```bash
-echo 'you@example.com' > ~/.config/s3seal/recipient
-```
+Running the installer again is safe.
 
 ## Protecting a client
 
