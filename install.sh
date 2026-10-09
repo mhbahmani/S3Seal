@@ -70,6 +70,44 @@ step() { printf '\n%s%s▸ %s%s\n' "$BOLD" "$CYAN" "$*" "$RESET" >&2; }
 info() { printf '  %s%s%s\n' "$DIM" "$*" "$RESET" >&2; }
 ok()   { printf '  %s✔%s %s\n' "$GREEN" "$RESET" "$*" >&2; }
 warn() { printf '  %s!%s %s\n' "$YELLOW" "$RESET" "$*" >&2; }
+
+# A rotating ring of squares, one square missing at a time, with the name of the
+# file being downloaded underneath. It only animates on a terminal.
+RING_PID=""
+ring_start() {  # FILE_HOLDING_THE_CURRENT_NAME
+  [[ -t 2 ]] || return 0
+  (
+    frame=0
+    while :; do
+      gone=$((frame % 8))
+      for row in 0 1 2; do
+        line=''
+        for col in 0 1 2; do
+          idx=-1
+          case "$row$col" in
+            00) idx=0 ;; 01) idx=1 ;; 02) idx=2 ;; 12) idx=3 ;;
+            22) idx=4 ;; 21) idx=5 ;; 20) idx=6 ;; 10) idx=7 ;;
+          esac
+          if (( idx >= 0 && idx != gone )); then line+='■ '; else line+='  '; fi
+        done
+        printf '\033[2K    %s%s%s\n' "$CYAN" "$line" "$RESET" >&2
+      done
+      name="$(cat "$1" 2>/dev/null || true)"
+      printf '\033[2K  %sdownloading %s%s\n\033[4A' "$DIM" "$name" "$RESET" >&2
+      frame=$((frame + 1))
+      sleep 0.15
+    done
+  ) &
+  RING_PID=$!
+}
+
+ring_stop() {
+  [[ -n "$RING_PID" ]] || return 0
+  kill "$RING_PID" 2>/dev/null || true
+  wait "$RING_PID" 2>/dev/null || true
+  RING_PID=""
+  printf '\r\033[J' >&2
+}
 fail() { printf '  %s✖%s %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 
 # Upgrades run through "s3seal upgrade" and never ask questions.
@@ -248,7 +286,7 @@ LIBEXEC_DIR="${S3SEAL_LIBEXEC_DIR:-}"   # asked later, only if an official clien
 # --- download and verify -----------------------------------------------------
 info ""
 stage="$(mktemp -d)"
-trap 'rm -rf "$stage"' EXIT
+trap 'ring_stop; rm -rf "$stage"' EXIT
 mkdir -p "$stage/libexec" "$stage/lib"
 
 script_dir=""
@@ -267,12 +305,15 @@ else
     REF="$(latest_release "$REPO")"
     [[ -n "$REF" ]] || fail "no release found for $REPO; use --dev to install master"
   fi
-  if (( DEV )); then info_release="development build from master"; else info_release="release $REF"; fi
+  if (( DEV )); then info_release="master (development build)"; else info_release="release $REF"; fi
   RAW_URL="https://raw.githubusercontent.com/$REPO/$REF"
-  info "$info_release from $REPO"
+  info "Source: $info_release of $REPO"
+  ring_start "$stage/.current"
   for f in $FILES; do
-    curl -fsSL "$RAW_URL/$f" -o "$stage/$f" || fail "download failed: $RAW_URL/$f"
+    printf '%s' "$f" > "$stage/.current"
+    curl -fsSL "$RAW_URL/$f" -o "$stage/$f" || { ring_stop; fail "download failed: $RAW_URL/$f"; }
   done
+  ring_stop
   # shellcheck disable=SC2086  # word splitting is the point here
   set -- $FILES
   ok "downloaded $# files"

@@ -855,7 +855,7 @@ test_install_defaults_to_release_tag() {
   fake_curl "$ROOT"
   OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
-  assert_out "release v1.2.0 from mhbahmani/s3seal"
+  assert_out "Source: release v1.2.0 of mhbahmani/s3seal"
 }
 
 test_install_dev_flag_uses_master() {
@@ -863,7 +863,7 @@ test_install_dev_flag_uses_master() {
   fake_curl "$ROOT"
   OUT="$("$TEST_BASH" -s -- --dev < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
-  assert_out "development build from master"
+  assert_out "Source: master (development build) of mhbahmani/s3seal"
 }
 
 test_upgrade_uses_latest_release_tag() {
