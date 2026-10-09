@@ -13,8 +13,16 @@ curl -fsSL https://raw.githubusercontent.com/mhbahmani/s3seal/master/install.sh 
 ```
 
 The installer asks which clients to protect and where to install. Press Enter
-to accept the defaults. If an official client is on your `PATH`, it asks before
-moving it out of the way, so that `s3seal` can use the name.
+to accept the default, `~/.local/share/s3seal`. Everything goes in that folder:
+the program files, and a `bin` folder holding the commands. If an official
+client is on your `PATH`, it asks before moving it out of the way, so that
+`s3seal` can use the name.
+
+Add the `bin` folder to your `PATH` once. The installer prints the line:
+
+```bash
+export PATH="$HOME/.local/share/s3seal/bin:$PATH"
+```
 
 Requirements: `bash`, `gpg`, `curl`. Each client you protect needs its own
 official binary (`mc` or `aws`).
@@ -94,7 +102,7 @@ client first.
 | --- | --- |
 | `S3SEAL_GPG_RECIPIENT` | GPG key id or email to encrypt to |
 | `S3SEAL_CONFIG_DIR` | Store location (default `~/.config/s3seal`) |
-| `S3SEAL_INSTALL_DIR` | Where the commands are linked (default `~/.local/bin`) |
+| `S3SEAL_INSTALL_DIR` | Where the commands are linked (default `<install folder>/bin`) |
 | `S3SEAL_YES` | Installer: accept every default without asking |
 | `MC_BIN` | Path to the real `mc` binary |
 | `S3SEAL_LIST_ENDPOINTS` | Show endpoints in `mc alias list` (decrypts every alias) |

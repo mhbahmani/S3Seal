@@ -30,20 +30,20 @@ S3SEAL_HOME="$(cd "$(dirname "$_self")/.." && pwd)"
 # shellcheck source=lib/mc.sh
 . "$S3SEAL_HOME/lib/mc.sh"
 
-BIN_DIR="${S3SEAL_INSTALL_DIR:-$HOME/.local/bin}"
+BIN_DIR="${S3SEAL_INSTALL_DIR:-$S3SEAL_HOME/bin}"
 CLIENTS="aws mc"
 
 bin_path() { printf '%s/%s' "$BIN_DIR" "$1"; }
 
-linked() { [[ -L "$(bin_path "$1")" && "$(readlink "$(bin_path "$1")")" == "$S3SEAL_HOME/bin/$1" ]]; }
+linked() { [[ -L "$(bin_path "$1")" && "$(readlink "$(bin_path "$1")")" == "$S3SEAL_HOME/libexec/$1" ]]; }
 
-# Link ~/.local/bin/NAME to our entry point, unless something else is there.
+# Link the command NAME in the bin folder to its entry point, unless something else is there.
 link_entry() {
   linked "$1" && return 0
   [[ ! -e "$(bin_path "$1")" && ! -L "$(bin_path "$1")" ]] \
     || die "$(bin_path "$1") exists and is not an s3seal link; move it aside first"
   mkdir -p "$BIN_DIR"
-  ln -s "$S3SEAL_HOME/bin/$1" "$(bin_path "$1")"
+  ln -s "$S3SEAL_HOME/libexec/$1" "$(bin_path "$1")"
 }
 
 unlink_entry() {
@@ -234,7 +234,7 @@ cmd_upgrade() {
   # Expanded now: a local variable is gone by the time the EXIT trap runs.
   # shellcheck disable=SC2064  # expanded now on purpose: the local is gone at exit
   trap "rm -rf '$tmp'" EXIT
-  curl -fsSL "https://raw.githubusercontent.com/$repo/$ref/bin/s3seal" -o "$tmp/s3seal" \
+  curl -fsSL "https://raw.githubusercontent.com/$repo/$ref/libexec/s3seal" -o "$tmp/s3seal" \
     || die "cannot fetch $repo@$ref"
   latest="$(sed -n 's/^VERSION="\(.*\)"$/\1/p' "$tmp/s3seal" | head -n1)"
 

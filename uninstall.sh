@@ -30,18 +30,18 @@ fi
 
 # Locate the installed copy from the s3seal link, if there is one.
 SHARE_DIR=""
-for dir in "${S3SEAL_INSTALL_DIR:-$HOME/.local/bin}" "$HOME/.local/bin"; do
+for dir in "${S3SEAL_INSTALL_DIR:-$HOME/.local/share/s3seal/bin}" "$HOME/.local/bin"; do
   if [[ -L "$dir/s3seal" ]]; then
     SHARE_DIR="$(dirname "$(dirname "$(readlink "$dir/s3seal")")")"
     break
   fi
 done
 SHARE_DIR="${S3SEAL_SHARE_DIR:-${SHARE_DIR:-$HOME/.local/share/s3seal}}"
-BIN_DIR="${S3SEAL_INSTALL_DIR:-$HOME/.local/bin}"
+BIN_DIR="${S3SEAL_INSTALL_DIR:-$SHARE_DIR/bin}"
 
 for name in mc aws s3seal; do
   target="$BIN_DIR/$name"
-  if [[ -L "$target" && "$(readlink "$target")" == "$SHARE_DIR/bin/$name" ]]; then
+  if [[ -L "$target" && "$(readlink "$target")" == "$SHARE_DIR/libexec/$name" ]]; then
     rm -f "$target"
     printf 'Removed %s\n' "$target"
   fi

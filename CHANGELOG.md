@@ -13,7 +13,9 @@
   replaced by `s3seal migrate mc`.
 - The installer moves an official client out of `PATH` only with your consent,
   and records its location for `s3seal`.
-- The entry points live in `bin/`, with the libraries in `lib/`.
+- Everything installs into one folder (default `~/.local/share/s3seal`): program
+  files in `libexec/`, enabled commands linked into `bin/` there. The installer no
+  longer asks for a commands folder; add `<folder>/bin` to your `PATH` once.
 
 ### Renamed
 

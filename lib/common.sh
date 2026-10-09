@@ -7,7 +7,7 @@ CONFIG_DIR="${S3SEAL_CONFIG_DIR:-$HOME/.config/s3seal}"
 die()  { printf 's3seal: %s\n' "$*" >&2; exit 1; }
 warn() { printf 's3seal: %s\n' "$*" >&2; }
 
-# Follow symlinks, so that ~/.local/bin/aws finds lib/ next to its installed copy.
+# Follow symlinks, so that a command link finds lib/ next to the installed copy.
 resolve_path() {
   local s="$1" t
   while [[ -L "$s" ]]; do
@@ -77,7 +77,7 @@ encrypt_private() {
 is_s3seal_entry() {
   local r
   r="$(resolve_path "$1")"
-  [[ "$r" == "$S3SEAL_HOME/bin/mc" || "$r" == "$S3SEAL_HOME/bin/aws" || "$r" == "$S3SEAL_HOME/bin/s3seal" ]]
+  [[ "$r" == "$S3SEAL_HOME/libexec/mc" || "$r" == "$S3SEAL_HOME/libexec/aws" || "$r" == "$S3SEAL_HOME/libexec/s3seal" ]]
 }
 
 # Print the real NAME binary: its recorded path, else the first executable on
