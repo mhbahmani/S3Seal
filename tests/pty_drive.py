@@ -19,6 +19,9 @@ def fill():
     except OSError:
         chunk = b""
     buf += chunk
+    if os.environ.get("PTY_TRACE"):
+        sys.stderr.write(chunk.decode(errors="replace"))
+        sys.stderr.flush()
     return bool(chunk)
 
 for step in steps:
@@ -28,6 +31,9 @@ for step in steps:
             break
     # Give the program time to switch the tty to no-echo before answering.
     time.sleep(0.3)
+    if os.environ.get("PTY_TRACE"):
+        sys.stderr.write("\n<<SEND %r>>\n" % answer)
+        sys.stderr.flush()
     os.write(fd, answer.encode() + b"\n")
 while fill():
     pass

@@ -32,6 +32,10 @@ set_version() {  # FILE VERSION
 
 export GNUPGHOME="$WORK/gnupg"
 mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
+# Tests must never open a passphrase window: pinentry is replaced by a program
+# that fails at once, so a passphrase request becomes an ordinary error.
+printf 'allow-loopback-pinentry\npinentry-program /bin/false\n' > "$GNUPGHOME/gpg-agent.conf"
+gpgconf --homedir "$GNUPGHOME" --kill gpg-agent >/dev/null 2>&1 || true
 gpg --batch --quiet --passphrase '' --quick-gen-key 's3seal test <test@s3seal.invalid>' \
   default default never >/dev/null 2>&1 || { echo "cannot create a GPG test key" >&2; exit 1; }
 
@@ -690,6 +694,7 @@ test_install_leaves_official_client_without_consent() {
 test_install_explains_move_that_needs_root() {
   command -v python3 >/dev/null 2>&1 || return 0
   install_env
+  export S3SEAL_NO_SUDO=1
   unset S3SEAL_YES
   cp "$FAKE_MC" "$T/bin/mc"
   chmod 555 "$T/bin"
@@ -817,6 +822,84 @@ test_uninstall_refuses_while_credentials_are_sealed() {
   assert_file "$HOME/.local/share/s3seal/bin/s3seal"
 }
 
+# --- GPG key setup in the installer -----------------------------------------
+keys_run() {  # answers on stdin: runs the installer on a terminal
+  command -v python3 >/dev/null 2>&1 || return 1
+  install_env
+  unset S3SEAL_YES S3SEAL_GPG_RECIPIENT
+  OUT="$(python3 "$ROOT/tests/pty_drive.py" "$TEST_BASH" "$ROOT/install.sh")"
+}
+
+test_installer_creates_a_key_pair() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  install_env
+  unset S3SEAL_YES S3SEAL_GPG_RECIPIENT
+  OUT="$(printf 'Install s3seal to\t\nPut the commands in\t\nUse an existing GPG key\t\nPassphrase (at least\tpass-phrase-1\nRepeat the passphrase\tpass-phrase-1\n' \
+    | python3 "$ROOT/tests/pty_drive.py" "$TEST_BASH" "$ROOT/install.sh")"
+  assert_out "created the key pair"
+  assert_not_out "pass-phrase-1"
+  local fpr; fpr="$(cat "$S3SEAL_CONFIG_DIR/recipient")"
+  [[ "$fpr" =~ ^[0-9A-F]{40}$ ]] || fail "recipient is not a fingerprint: $fpr"
+  [[ "$(cat "$S3SEAL_CONFIG_DIR/generated-key")" == "$fpr" ]] || fail "generated-key marker missing"
+  gpg --batch --list-secret-keys "$fpr" >/dev/null 2>&1 || fail "key not in the keyring"
+}
+
+test_installer_rerun_keeps_key_and_creates_nothing() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  install_env
+  unset S3SEAL_YES S3SEAL_GPG_RECIPIENT
+  printf 'Install s3seal to\t\nPut the commands in\t\nUse an existing GPG key\t\nPassphrase (at least\tpass-phrase-1\nRepeat the passphrase\tpass-phrase-1\n' \
+    | python3 "$ROOT/tests/pty_drive.py" "$TEST_BASH" "$ROOT/install.sh" >/dev/null
+  local before after fpr
+  fpr="$(cat "$S3SEAL_CONFIG_DIR/recipient")"
+  before="$(gpg --batch --with-colons --list-secret-keys | grep -c '^sec')"
+  OUT="$(printf 'Install s3seal to\t\nPut the commands in\t\nReplace it with a new key pair\t\n' \
+    | python3 "$ROOT/tests/pty_drive.py" "$TEST_BASH" "$ROOT/install.sh")"
+  after="$(gpg --batch --with-colons --list-secret-keys | grep -c '^sec')"
+  assert_out "already has its key ($fpr). Keeping it."
+  [[ "$before" == "$after" ]] || fail "a key was created or removed on rerun"
+  [[ "$(cat "$S3SEAL_CONFIG_DIR/recipient")" == "$fpr" ]] || fail "recipient changed on rerun"
+}
+
+test_installer_replace_reencrypts_and_removes_only_our_pair() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  install_env
+  unset S3SEAL_YES S3SEAL_GPG_RECIPIENT
+  # An s3seal-created pair without a passphrase, so the test needs no pinentry.
+  gpg -q --batch --passphrase '' --quick-gen-key 'old <old@s3seal.invalid>' default default never 2>/dev/null
+  local old; old="$(gpg --batch --with-colons --list-secret-keys old@s3seal.invalid | awk -F: '$1=="fpr"{print $10; exit}')"
+  mkdir -p "$S3SEAL_CONFIG_DIR"
+  printf '%s\n' "$old" > "$S3SEAL_CONFIG_DIR/recipient"
+  printf '%s\n' "$old" > "$S3SEAL_CONFIG_DIR/generated-key"
+  # Read the old key's IDs now: the installer removes this key later.
+  old_ids="$(gpg --batch --with-colons --list-keys "$old" | awk -F: '$1=="pub"||$1=="sub"{print $5}')"
+  mkdir -p "$S3SEAL_CONFIG_DIR/aliases"
+  printf 'https://AK1:SECRET1@minio.example.com' \
+    | gpg -q --batch --yes --armor --encrypt --recipient "$old" --output "$S3SEAL_CONFIG_DIR/aliases/prod.url.asc"
+  local other; other="$(gpg --batch --with-colons --list-secret-keys test@s3seal.invalid | awk -F: '$1=="fpr"{print $10; exit}')"
+
+  OUT="$(printf 'Install s3seal to\t\nPut the commands in\t\nReplace it with a new key pair\ty\nPassphrase (at least\tpass-phrase-2\nRepeat the passphrase\tpass-phrase-2\n' \
+    | python3 "$ROOT/tests/pty_drive.py" "$TEST_BASH" "$ROOT/install.sh")"
+  local new; new="$(cat "$S3SEAL_CONFIG_DIR/recipient")"
+  [[ "$new" != "$old" ]] || fail "recipient did not change"
+  assert_out "stored credentials are now encrypted to $new"
+  gpg --batch --list-secret-keys "$old" >/dev/null 2>&1 && fail "old s3seal key still present"
+  gpg --batch --list-secret-keys "$other" >/dev/null 2>&1 || fail "an unrelated key was removed"
+  # The new key has a passphrase. --list-only shows the recipients without
+  # unlocking anything, so no passphrase prompt can appear. Encryption uses a subkey, so compare every key ID.
+  local packets rc=0
+  packets="$(gpg --batch --list-packets --list-only "$S3SEAL_CONFIG_DIR/aliases/prod.url.asc" 2>&1)" || rc=$?
+  (( rc == 0 )) || fail "could not read the packets of prod.url.asc (rc=$rc): $packets"
+  local new_ids id
+  new_ids="$(gpg --batch --with-colons --list-keys "$new" | awk -F: '$1=="pub"||$1=="sub"{print $5}')"
+  local hit_new=0 hit_old=0
+  for id in $new_ids; do grep -q "keyid $id" <<<"$packets" && hit_new=1; done
+  for id in $old_ids; do grep -q "keyid $id" <<<"$packets" && hit_old=1; done
+  (( hit_new )) || fail "stored credential was not re-encrypted to the new key"
+  (( hit_old )) && fail "stored credential still names the old key"
+  assert_no_file "$S3SEAL_CONFIG_DIR/aliases/prod.url.asc.rekey"
+}
+
 test_install_checksums_are_current() {
   local f actual
   for f in bin/mc bin/aws bin/s3seal lib/common.sh lib/ini.sh lib/aws.sh lib/mc.sh; do
@@ -856,10 +939,10 @@ test_upgrade_check_and_latest() {
   fake_curl "$ROOT"
   OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
-  run_out "$HOME/.local/share/s3seal/bin/s3seal" upgrade --check
+  run_entry "$HOME/.local/share/s3seal/bin/s3seal" upgrade --check
   assert_rc 0
   assert_out "installed 1.1.0, available 1.1.0 (mhbahmani/s3seal@master)"
-  run_out "$HOME/.local/share/s3seal/bin/s3seal" upgrade
+  run_entry "$HOME/.local/share/s3seal/bin/s3seal" upgrade
   assert_rc 0
   assert_out "already the latest version"
 }
@@ -870,9 +953,9 @@ test_upgrade_replaces_older_install() {
   OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
   set_version "$HOME/.local/share/s3seal/bin/s3seal" 1.0.0
-  run_out "$HOME/.local/share/s3seal/bin/s3seal" upgrade --check
+  run_entry "$HOME/.local/share/s3seal/bin/s3seal" upgrade --check
   assert_out "installed 1.0.0, available 1.1.0"
-  run_out "$HOME/.local/share/s3seal/bin/s3seal" upgrade
+  run_entry "$HOME/.local/share/s3seal/bin/s3seal" upgrade
   assert_rc 0
   assert_out "Upgrading s3seal 1.0.0 -> 1.1.0"
   run_out "$HOME/.local/share/s3seal/bin/s3seal" --version
