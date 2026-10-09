@@ -25,6 +25,8 @@ S3SEAL_HOME="$(cd "$(dirname "$_self")/.." && pwd)"
 . "$S3SEAL_HOME/lib/common.sh"
 # shellcheck source=lib/mc.sh
 . "$S3SEAL_HOME/lib/mc.sh"
+# shellcheck source=lib/ui.sh
+. "$S3SEAL_HOME/lib/ui.sh"
 
 STORE="$MC_STORE"
 
@@ -197,6 +199,7 @@ cmd_alias_set() {
   fi
 
   encrypt_to_store "$name" "$full" "$rcpt"
+  mc_write_host "$name" "$scheme://$host"
   printf 'Stored alias %s -> %s://%s (encrypted)\n' "$name" "$scheme" "$host"
 }
 
@@ -204,33 +207,44 @@ cmd_alias_remove() {
   require_valid_alias "$1"
   local f; f="$(store_path "$1")"
   [[ -e "$f" ]] || die "no stored credentials for alias '$1'"
-  rm -f -- "$f"
+  rm -f -- "$f" "$(mc_host_path "$1")"
   printf 'Removed alias %s\n' "$1"
 }
 
 cmd_alias_list() {
-  local f n url found=0
+  local f n url rest host found=0 width=8 line listed='' count=0
+  for f in "$STORE"/*.url.asc; do
+    [[ -e "$f" ]] || continue
+    n="${f##*/}"; n="${n%.url.asc}"
+    (( ${#n} > width )) && width=${#n}
+  done
   for f in "$STORE"/*.url.asc; do
     [[ -e "$f" ]] || continue
     found=1
     n="${f##*/}"; n="${n%.url.asc}"
-    if [[ -n "${S3SEAL_LIST_ENDPOINTS:-}" ]]; then
-      url="$(decrypt_alias "$n")"
-      printf '%-20s %s://%s\n' "$n" "${url%%://*}" "${url##*@}"
-    else
-      printf '%s\n' "$n"
+    if [[ ! -r "$(mc_host_path "$n")" ]]; then
+      # Aliases sealed before the host was kept: read it once, then remember it.
+      url="$(run_gpg --quiet --batch --decrypt "$f" 2>/dev/null)" || url=''
+      if [[ -n "$url" ]]; then
+        rest="${url#*://}"
+        mc_write_host "$n" "${url%%://*}://${rest##*@}"
+      fi
     fi
+    host="$(cat "$(mc_host_path "$n")" 2>/dev/null || true)"
+    ui_row 32 "$n" "$width" "$(printf '%-30s' "${host:-(unknown)}")" "sealed"
   done
-  (( found )) || printf 'No aliases stored in %s\n' "$STORE"
+  (( found )) || printf 'No aliases sealed in %s\n' "$STORE"
 
-  local leftover alias_names=''
-  leftover="$(mc_plaintext_aliases)"
-  if [[ -n "$leftover" ]]; then
+  line="$(mc_plaintext_aliases)"
+  if [[ -n "$line" ]]; then
     while IFS= read -r f; do
-      alias_names+="${alias_names:+, }$(json_field "$f" alias)"
-    done <<< "$leftover"
-    warn "warning: mc's own config still holds plaintext credentials for: $alias_names"
-    warn "run 's3seal migrate mc' to encrypt them and remove the plaintext copies"
+      listed+="${listed:+, }$(json_field "$f" alias)"
+      count=$((count + 1))
+    done <<< "$line"
+    printf '\n'
+    ui_notice 33 "$count alias(es) still keep plaintext keys in mc's config"
+    ui_hint "$listed"
+    ui_hint "encrypt them with: s3seal migrate mc"
   fi
 }
 

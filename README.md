@@ -109,7 +109,6 @@ client first.
 | `S3SEAL_INSTALL_DIR` | Where the commands are linked (default `<install folder>/bin`) |
 | `S3SEAL_YES` | Installer: accept every default without asking |
 | `MC_BIN` | Path to the real `mc` binary |
-| `S3SEAL_LIST_ENDPOINTS` | Show endpoints in `mc alias list` (decrypts every alias) |
 | `S3SEAL_DEBUG` | Always show gpg's diagnostics |
 
 ## Limitations

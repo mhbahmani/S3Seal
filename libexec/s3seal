@@ -7,12 +7,12 @@
 #   s3seal disable aws|mc [--yes | --no-migrate]
 #   s3seal migrate aws|mc [--to plain]
 #   s3seal status
-#   s3seal upgrade [--check] [--force]
+#   s3seal upgrade [--check] [--force] [--dev]
 #
 # "credential-process" is called by the AWS CLI, not by users.
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 
 _self="$0"
 while [[ -L "$_self" ]]; do
@@ -218,24 +218,41 @@ usage:
   s3seal disable aws|mc [--yes | --no-migrate]
   s3seal migrate aws|mc [--to plain]
   s3seal status
-  s3seal upgrade [--check] [--force]
+  s3seal upgrade [--check] [--force] [--dev]
   s3seal --version
 EOF
 }
 
-cmd_upgrade() {
-  local check=0 force=0 repo=mhbahmani/s3seal ref=master latest tmp a
+# The newest release tag of REPO. Releases are preferred; a repository with only
+# tags falls back to its newest tag.
+latest_release_tag() {  # REPO
+  local tag
+  tag="$(curl -fsSL "https://api.github.com/repos/$1/releases/latest" 2>/dev/null \
+    | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)"
+  if [[ -z "$tag" ]]; then
+    tag="$(curl -fsSL "https://api.github.com/repos/$1/tags" 2>/dev/null \
+      | sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' | head -n1)"
+  fi
+  [[ -n "$tag" ]] || die "no release found for $1. Use 's3seal upgrade --dev' for the master branch."
+  printf '%s' "$tag"
+}
+
+cmd_upgrade() {  # [--check] [--force] [--dev]
+  local check=0 force=0 dev=0 repo=mhbahmani/s3seal ref latest tmp a
   for a in "$@"; do
     case "$a" in
       --check) check=1 ;;
       --force) force=1 ;;
+      --dev) dev=1 ;;
       *) die "unknown option '$a' for upgrade" ;;
     esac
   done
   [[ -f "$S3SEAL_HOME/source" ]] \
     || die "upgrade works on an installed copy, not on a git checkout (no $S3SEAL_HOME/source)"
-  read -r repo ref < "$S3SEAL_HOME/source" || true
+  read -r repo _ < "$S3SEAL_HOME/source" || true
   command -v curl >/dev/null 2>&1 || die "curl is required to upgrade"
+
+  if (( dev )); then ref=master; else ref="$(latest_release_tag "$repo")"; fi
 
   tmp="$(mktemp -d)"
   # Expanded now: a local variable is gone by the time the EXIT trap runs.
@@ -250,7 +267,7 @@ cmd_upgrade() {
     exit 0
   fi
   if [[ "$latest" == "$VERSION" ]] && (( ! force )); then
-    printf 's3seal %s is already the latest version. Nothing to do.\n' "$VERSION"
+    printf 's3seal %s is already up to date (%s). Nothing to do.\n' "$VERSION" "$ref"
     exit 0
   fi
 

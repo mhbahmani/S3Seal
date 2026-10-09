@@ -48,6 +48,11 @@ mc_real_binary() {
 
 mc_store_path() { printf '%s/%s.url.asc' "$MC_STORE" "$1"; }
 
+# The endpoint of a sealed alias (scheme and host, no keys) is kept in plaintext,
+# so listing aliases needs no passphrase.
+mc_host_path() { printf '%s/%s.host' "$MC_STORE" "$1"; }
+mc_write_host() { printf '%s\n' "$2" > "$(mc_host_path "$1")"; }
+
 # Value of one JSON string field on one line of mc's output, JSON escapes undone.
 json_field() {
   local line="$1" key="$2" re raw out='' i c hex
@@ -152,6 +157,7 @@ mc_seal_all() {
       || die "GPG encryption failed for alias '$name'"
     "$MC_REAL" ${MC_FLAGS[@]+"${MC_FLAGS[@]}"} alias remove "$name" >/dev/null \
       || die "stored '$name' encrypted, but could not remove it from mc's config; remove it with: $MC_REAL alias remove $name"
+    mc_write_host "$name" "$scheme://$host"
     printf 'Sealed mc alias %s\n' "$name"
     migrated=$((migrated + 1))
   done < <(mc_plaintext_aliases)

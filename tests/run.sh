@@ -317,13 +317,11 @@ test_completion_never_decrypts() {
 
 test_list_and_endpoints() {
   run_mc alias list
-  assert_out "No aliases stored"
+  assert_out "No aliases sealed"
   store prod https://minio.example.com AK1 SECRET123
   run_mc alias ls
-  assert_rc 0; assert_out "prod"; assert_not_out "minio.example.com"
-  export S3SEAL_LIST_ENDPOINTS=1
-  run_mc alias list
-  assert_out "https://minio.example.com"; assert_not_out "SECRET123"
+  assert_rc 0; assert_out "prod"; assert_out "https://minio.example.com"
+  assert_not_out "SECRET123"; assert_not_out "AK1"
 }
 
 test_list_warns_about_plaintext() {
@@ -333,10 +331,11 @@ test_list_warns_about_plaintext() {
 {"status":"success","alias":"local","URL":"http://localhost:9000","path":"auto","src":"/x/config.json"}
 JSON
   run_mc alias list
-  assert_not_out "plaintext credentials"
+  assert_not_out "still keep plaintext"
   echo '{"status":"success","alias":"prod","URL":"https://minio.example.com","accessKey":"AK1","secretKey":"SECRET123","api":"S3v4","path":"auto","src":"/x/config.json"}' >> "$FAKE_MC_CONFIG"
   run_mc alias list
-  assert_out "plaintext credentials for: prod"
+  assert_out "1 alias(es) still keep plaintext keys"
+  assert_out "prod"
   assert_out "s3seal migrate mc"
 }
 
@@ -690,6 +689,7 @@ while [ \$# -gt 0 ]; do
   esac
   shift
 done
+case "\$url" in *api.github.com*) printf '{"tag_name": "%s"}\n' "\${FAKE_TAG:-v1.2.0}"; exit 0 ;; esac
 rel="\$(printf '%s' "\$url" | cut -d/ -f7-)"
 [ -f "\$src/\$rel" ] || exit 22
 mkdir -p "\$(dirname "\$out")"
@@ -802,13 +802,42 @@ test_install_replaces_nested_libexec_folder() {
   assert_out "already installed and up to date"
 }
 
+test_install_defaults_to_release_tag() {
+  install_env
+  fake_curl "$ROOT"
+  OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  assert_out "Downloading s3seal from mhbahmani/s3seal@v1.2.0"
+  assert_out "all files match their checksums"
+}
+
+test_install_dev_flag_uses_master() {
+  install_env
+  fake_curl "$ROOT"
+  OUT="$("$TEST_BASH" -s -- --dev < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  assert_out "Downloading s3seal from mhbahmani/s3seal@master"
+  assert_out "not verified"
+}
+
+test_upgrade_uses_latest_release_tag() {
+  install_env
+  fake_curl "$ROOT"
+  OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  export FAKE_TAG=v1.3.0
+  run_entry "$HOME/.local/share/s3seal/libexec/s3seal" upgrade --check
+  assert_out "available 1.2.0 (mhbahmani/s3seal@v1.3.0)"
+  unset FAKE_TAG
+}
+
 test_install_twice_is_idempotent() {
   install_env
   OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
-  assert_rc 0; assert_out "Installing s3seal 1.1.0"
+  assert_rc 0; assert_out "Installing s3seal 1.2.0"
   OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
-  assert_out "s3seal 1.1.0 is already installed and up to date"
+  assert_out "s3seal 1.2.0 is already installed and up to date"
   assert_not_out "Installing s3seal"
   [[ "$(readlink "$HOME/.local/share/s3seal/bin/s3seal")" == "$HOME/.local/share/s3seal/libexec/s3seal" ]] || fail "link lost"
 }
@@ -972,8 +1001,8 @@ test_install_reports_upgrade_over_older_version() {
   set_version "$HOME/.local/share/s3seal/libexec/s3seal" 1.0.0
   OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
-  assert_out "Upgrading s3seal 1.0.0 -> 1.1.0"
-  assert_out "installed s3seal 1.1.0"
+  assert_out "Upgrading s3seal 1.0.0 -> 1.2.0"
+  assert_out "installed s3seal 1.2.0"
   OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_out "already installed and up to date"
 }
@@ -995,10 +1024,10 @@ test_upgrade_check_and_latest() {
   assert_rc 0
   run_entry "$HOME/.local/share/s3seal/bin/s3seal" upgrade --check
   assert_rc 0
-  assert_out "installed 1.1.0, available 1.1.0 (mhbahmani/s3seal@master)"
+  assert_out "installed 1.2.0, available 1.2.0 (mhbahmani/s3seal@v1.2.0)"
   run_entry "$HOME/.local/share/s3seal/bin/s3seal" upgrade
   assert_rc 0
-  assert_out "already the latest version"
+  assert_out "already up to date"
 }
 
 test_upgrade_replaces_older_install() {
@@ -1008,12 +1037,12 @@ test_upgrade_replaces_older_install() {
   assert_rc 0
   set_version "$HOME/.local/share/s3seal/libexec/s3seal" 1.0.0
   run_entry "$HOME/.local/share/s3seal/bin/s3seal" upgrade --check
-  assert_out "installed 1.0.0, available 1.1.0"
+  assert_out "installed 1.0.0, available 1.2.0"
   run_entry "$HOME/.local/share/s3seal/bin/s3seal" upgrade
   assert_rc 0
-  assert_out "Upgrading s3seal 1.0.0 -> 1.1.0"
+  assert_out "Upgrading s3seal 1.0.0 -> 1.2.0"
   run_out "$HOME/.local/share/s3seal/bin/s3seal" --version
-  assert_out "s3seal 1.1.0"
+  assert_out "s3seal 1.2.0"
 }
 
 test_upgrade_refuses_a_checkout() {
