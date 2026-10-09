@@ -189,8 +189,10 @@ test_set_rejects_colon_in_keys() {
 }
 
 test_set_rejects_bad_names_and_urls() {
-  run_mc alias set my-minio https://minio.example.com AK SECRET123
+  run_mc alias set -prod https://minio.example.com AK SECRET123
   assert_rc 1; assert_out "cannot be used"
+  run_mc alias set my-minio https://minio.example.com AK SECRET123
+  assert_rc 0; assert_out "Stored alias my-minio"
   run_mc alias set prod https://minio.example.com/path AK SECRET123
   assert_rc 1; assert_out "bare endpoint"
   run_mc alias set prod https://user:pw@minio.example.com AK SECRET123
@@ -365,9 +367,9 @@ JSON
   run_entry "$ROOT/libexec/s3seal" migrate mc
   assert_rc 1
   assert_out "Sealed mc alias prod"
-  assert_out "skipping 'my-minio'"
+  assert_out "Sealed mc alias my-minio"
   assert_out "skipping 'legacy'"
-  assert_out "1 sealed, 2 skipped"
+  assert_out "2 sealed, 1 skipped"
   assert_not_out "envy"
   [[ "$(stored prod)" == 'https://AK1:a&b/c+d"e\f@minio.example.com' ]] || fail "stored: $(stored prod)"
   assert_log "ARGS: [alias] [remove] [prod]"

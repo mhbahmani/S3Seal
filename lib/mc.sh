@@ -125,8 +125,8 @@ mc_seal_all() {
     api="$(json_field "$line" api)"
     path="$(json_field "$line" path)"
 
-    if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-      warn "skipping '$name': mc reads it as MC_HOST_<name>, so it must be a shell identifier"
+    if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+      warn "skipping '$name': not a usable alias name"
       skipped=$((skipped + 1)); continue
     fi
     if [[ -n "$api" && "$api" != [Ss]3[Vv]4 ]] || [[ -n "$path" && "$path" != auto ]]; then

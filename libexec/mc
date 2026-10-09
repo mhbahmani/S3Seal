@@ -45,11 +45,11 @@ Set MC_BIN, or write its absolute path to $MC_PATH_FILE"
 
 # mc reads aliases from MC_HOST_<alias>, so an alias name has to be a valid
 # shell identifier. Names containing "-" or "." cannot be supported.
-valid_alias() { [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; }
+valid_alias() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; }
 
 require_valid_alias() {
   valid_alias "$1" || die "alias '$1' cannot be used.
-Names must match [A-Za-z_][A-Za-z0-9_]* because mc reads them as MC_HOST_<name>."
+Names may use letters, digits, '-', '.' and '_', and must not start with a symbol."
 }
 
 store_path() { printf '%s/%s.url.asc' "$STORE" "$1"; }
@@ -292,15 +292,17 @@ fi
 # ---------------------------------------------------------------------------
 # Any other command: export credentials for every alias it references
 # ---------------------------------------------------------------------------
+HOST_ENV=()
 for arg in ${POSITIONAL[@]+"${POSITIONAL[@]}"}; do
   candidate="${arg%%/*}"
   valid_alias "$candidate" || continue
   [[ -r "$(store_path "$candidate")" ]] || continue
   var="MC_HOST_$candidate"
-  [[ -n "${!var:-}" ]] && continue
-  # Assigned separately: "export x=$(...)" would hide a decryption failure.
+  [[ -n "$(printenv "$var" 2>/dev/null || true)" ]] && continue
+  # Assigned separately: a command substitution inside the argument would hide a
+  # decryption failure. Set through env, so names with "-" or "." work too.
   value="$(decrypt_alias "$candidate")"
-  export "$var=$value"
+  HOST_ENV+=("$var=$value")
 done
 
-exec "$MC_REAL" "$@"
+exec env ${HOST_ENV[@]+"${HOST_ENV[@]}"} "$MC_REAL" "$@"

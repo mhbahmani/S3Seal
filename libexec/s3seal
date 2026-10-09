@@ -147,7 +147,7 @@ cmd_enable() {  # TOOL [FLAG]
   if (( count == 0 )); then
     printf 'No plaintext %s credentials to migrate.\n' "$tool"
   elif confirm_migrate "Migrate $count $tool credential(s) to encrypted storage now" "$flag"; then
-    to_sealed "$tool"
+    to_sealed "$tool" || warn "some $tool credentials were skipped; see the messages above"
   else
     printf 'Left %s credential(s) in plaintext. To migrate them later, run:\n  s3seal migrate %s\n' "$count" "$tool"
     printf 'Or do it by hand:\n'
