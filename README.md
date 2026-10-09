@@ -6,6 +6,10 @@ plaintext in `~/.mc/config.json` and `~/.aws/credentials`.
 You keep using `mc` and `aws` as usual. `s3seal` turns sealing on or off for
 each client and moves its credentials between plaintext and encrypted storage.
 
+<p align="center">
+  <img src="docs/s3seal-overview.png" alt="How s3seal keeps keys encrypted" width="800">
+</p>
+
 ## Install
 
 ```bash
