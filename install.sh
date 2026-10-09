@@ -81,7 +81,7 @@ progress_start() {  # FILE_HOLDING_THE_CURRENT_NAME
     while :; do
       name="$(cat "$1" 2>/dev/null || true)"
       dots="..."
-      printf '\r\033[2K  %sdownloading %s%s%s' "$DIM" "$name" "${dots:0:$((step_no % 3 + 1))}" "$RESET" >&2
+      printf '\r\033[2K  %sdownloading %s %s%s' "$DIM" "$name" "${dots:0:$((step_no % 3 + 1))}" "$RESET" >&2
       step_no=$((step_no + 1))
       sleep 0.4
     done
