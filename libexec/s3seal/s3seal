@@ -19,7 +19,7 @@ while [[ -L "$_self" ]]; do
   _t="$(readlink "$_self")"
   [[ "$_t" == /* ]] && _self="$_t" || _self="$(dirname "$_self")/$_t"
 done
-S3SEAL_HOME="$(cd "$(dirname "$_self")/.." && pwd)"
+S3SEAL_HOME="$(cd "$(dirname "$_self")/../.." && pwd)"
 
 # shellcheck source=lib/common.sh
 . "$S3SEAL_HOME/lib/common.sh"
@@ -35,15 +35,21 @@ CLIENTS="aws mc"
 
 bin_path() { printf '%s/%s' "$BIN_DIR" "$1"; }
 
-linked() { [[ -L "$(bin_path "$1")" && "$(readlink "$(bin_path "$1")")" == "$S3SEAL_HOME/libexec/$1" ]]; }
+linked() { [[ -L "$(bin_path "$1")" && "$(readlink "$(bin_path "$1")")" == "$S3SEAL_HOME/libexec/s3seal/$1" ]]; }
 
-# Link the command NAME in the bin folder to its entry point, unless something else is there.
+# Link the command NAME in the bin folder to its entry point. A plain copy left
+# by an older install is replaced; anything else that is there is refused.
 link_entry() {
+  local target; target="$(bin_path "$1")"
   linked "$1" && return 0
-  [[ ! -e "$(bin_path "$1")" && ! -L "$(bin_path "$1")" ]] \
-    || die "$(bin_path "$1") exists and is not an s3seal link; move it aside first"
+  if [[ -L "$target" ]]; then
+    die "$target is a link to something else; move it aside first"
+  elif [[ -e "$target" ]]; then
+    grep -q '^# s3seal:' "$target" || die "$target exists and is not s3seal; move it aside first"
+    rm -f "$target"
+  fi
   mkdir -p "$BIN_DIR"
-  ln -s "$S3SEAL_HOME/libexec/$1" "$(bin_path "$1")"
+  ln -s "$S3SEAL_HOME/libexec/s3seal/$1" "$target"
 }
 
 unlink_entry() {
@@ -77,7 +83,7 @@ need_mc() {
 plain_names() {
   case "$1" in
     aws) aws_plaintext_profiles ;;
-    mc) need_mc; mc_plaintext_aliases | while IFS= read -r l; do json_field "$l" alias; done ;;
+    mc) need_mc; mc_plaintext_aliases | while IFS= read -r l; do json_field "$l" alias; echo; done ;;
   esac
 }
 
@@ -128,6 +134,9 @@ confirm_migrate() {  # QUESTION FLAG
 }
 
 count_lines() { grep -c . || true; }
+
+# Reads names on stdin, prints them on one line separated by ", ".
+join_commas() { { grep . || true; } | paste -sd, - | sed "s/,/, /g"; }
 
 cmd_enable() {  # TOOL [FLAG]
   local tool="$1" flag="${2-}" count
@@ -191,16 +200,14 @@ cmd_migrate() {  # TOOL [--to plain|sealed]
 }
 
 cmd_status() {
-  local tool p
+  local tool names
   for tool in $CLIENTS; do
     printf '%s:\n' "$tool"
-    if linked "$tool"; then printf '  link:       on\n'; else printf '  link:       off\n'; fi
-    while IFS= read -r p; do
-      [[ -n "$p" ]] && printf '  sealed:     %s\n' "$p"
-    done <<< "$(sealed_names "$tool")"
-    while IFS= read -r p; do
-      [[ -n "$p" ]] && printf '  PLAINTEXT:  %s (run: s3seal migrate %s)\n' "$p" "$tool"
-    done <<< "$(plain_names "$tool" 2>/dev/null || true)"
+    if linked "$tool"; then printf '  enabled:    yes\n'; else printf '  enabled:    no\n'; fi
+    names="$(sealed_names "$tool" | join_commas)"
+    [[ -n "$names" ]] && printf '  sealed:     %s\n' "$names"
+    names="$(plain_names "$tool" 2>/dev/null | join_commas)"
+    [[ -n "$names" ]] && printf '  PLAINTEXT:  %s (run: s3seal migrate %s)\n' "$names" "$tool"
   done
 }
 
@@ -234,7 +241,7 @@ cmd_upgrade() {
   # Expanded now: a local variable is gone by the time the EXIT trap runs.
   # shellcheck disable=SC2064  # expanded now on purpose: the local is gone at exit
   trap "rm -rf '$tmp'" EXIT
-  curl -fsSL "https://raw.githubusercontent.com/$repo/$ref/libexec/s3seal" -o "$tmp/s3seal" \
+  curl -fsSL "https://raw.githubusercontent.com/$repo/$ref/libexec/s3seal/s3seal" -o "$tmp/s3seal" \
     || die "cannot fetch $repo@$ref"
   latest="$(sed -n 's/^VERSION="\(.*\)"$/\1/p' "$tmp/s3seal" | head -n1)"
 

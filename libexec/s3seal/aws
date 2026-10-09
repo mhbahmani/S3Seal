@@ -10,7 +10,7 @@ while [[ -L "$_self" ]]; do
   _t="$(readlink "$_self")"
   [[ "$_t" == /* ]] && _self="$_t" || _self="$(dirname "$_self")/$_t"
 done
-S3SEAL_HOME="$(cd "$(dirname "$_self")/.." && pwd)"
+S3SEAL_HOME="$(cd "$(dirname "$_self")/../.." && pwd)"
 
 # shellcheck source=lib/common.sh
 . "$S3SEAL_HOME/lib/common.sh"

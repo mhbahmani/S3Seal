@@ -19,7 +19,7 @@ while [[ -L "$_self" ]]; do
   _t="$(readlink "$_self")"
   [[ "$_t" == /* ]] && _self="$_t" || _self="$(dirname "$_self")/$_t"
 done
-S3SEAL_HOME="$(cd "$(dirname "$_self")/.." && pwd)"
+S3SEAL_HOME="$(cd "$(dirname "$_self")/../.." && pwd)"
 
 # shellcheck source=lib/common.sh
 . "$S3SEAL_HOME/lib/common.sh"
@@ -227,9 +227,9 @@ cmd_alias_list() {
   leftover="$(mc_plaintext_aliases)"
   if [[ -n "$leftover" ]]; then
     while IFS= read -r f; do
-      alias_names+=" $(json_field "$f" alias)"
+      alias_names+="${alias_names:+, }$(json_field "$f" alias)"
     done <<< "$leftover"
-    warn "warning: mc's own config still holds plaintext credentials for:$alias_names"
+    warn "warning: mc's own config still holds plaintext credentials for: $alias_names"
     warn "run 's3seal migrate mc' to encrypt them and remove the plaintext copies"
   fi
 }

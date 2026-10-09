@@ -77,7 +77,7 @@ encrypt_private() {
 is_s3seal_entry() {
   local r
   r="$(resolve_path "$1")"
-  [[ "$r" == "$S3SEAL_HOME/libexec/mc" || "$r" == "$S3SEAL_HOME/libexec/aws" || "$r" == "$S3SEAL_HOME/libexec/s3seal" ]]
+  [[ "$r" == "$S3SEAL_HOME/libexec/s3seal/mc" || "$r" == "$S3SEAL_HOME/libexec/s3seal/aws" || "$r" == "$S3SEAL_HOME/libexec/s3seal/s3seal" ]]
 }
 
 # Print the real NAME binary: its recorded path, else the first executable on
