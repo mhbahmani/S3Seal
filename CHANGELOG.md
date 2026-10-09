@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0
 
 ### Added
 
@@ -18,6 +18,8 @@
   prints one note at the end, with the `export PATH` line for your shell.
 - `mc alias list` shows each sealed alias's host, and the columns line up.
 - The plaintext-credentials notice is a short block with a suggested command.
+- The installer shows which file it is downloading, with a short progress indicator
+  on the same line.
 
 ## 1.2.0
 
