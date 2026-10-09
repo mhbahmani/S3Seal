@@ -94,8 +94,7 @@ curl -fsSL https://raw.githubusercontent.com/mhbahmani/s3seal/master/uninstall.s
 ```
 
 `s3seal upgrade` downloads the installer from the repository the copy came
-from, and the installer checks every file against its checksums. It does not
-work on a git checkout.
+from. It does not work on a git checkout.
 
 Uninstall refuses while credentials are sealed. Run `s3seal disable` for each
 client first.

@@ -30,7 +30,6 @@
 - An `aws` shim handles `aws configure` (interactive and set/get of key
   fields) and `aws configure import`; every other command runs the real CLI.
 - `lib/` with shared helpers, a minimal INI editor, and the AWS support.
-- Installed files are verified one by one against checksums.
 
 ### Added
 

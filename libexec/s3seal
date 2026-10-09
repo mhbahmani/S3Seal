@@ -121,15 +121,17 @@ manual_sealed() {
 }
 
 # Asks before moving credentials. --yes migrates, --no-migrate skips, and with
-# no terminal nothing is moved.
-confirm_migrate() {  # QUESTION FLAG
+# no terminal nothing is moved. DEFAULT(y|n) is what Enter means.
+confirm_migrate() {  # QUESTION FLAG DEFAULT
   case "$2" in
     --yes) return 0 ;;
     --no-migrate) return 1 ;;
   esac
   have_tty || { warn "no terminal to ask; not migrating (pass --yes to migrate now)"; return 1; }
-  local answer=''
-  prompt_tty answer "$1? [y/N]: "
+  local answer='' hint='[y/N]'
+  if [[ "$3" == y ]]; then hint='[Y/n]'; fi
+  prompt_tty answer "$1? $hint: "
+  if [[ -z "$answer" ]]; then [[ "$3" == y ]]; return; fi
   [[ "$answer" == y || "$answer" == Y || "$answer" == yes ]]
 }
 
@@ -146,7 +148,7 @@ cmd_enable() {  # TOOL [FLAG]
   count="$(plain_names "$tool" | count_lines)"
   if (( count == 0 )); then
     printf 'No plaintext %s credentials to migrate.\n' "$tool"
-  elif confirm_migrate "Migrate $count $tool credential(s) to encrypted storage now" "$flag"; then
+  elif confirm_migrate "Migrate $count $tool credential(s) to encrypted storage now" "$flag" y; then
     to_sealed "$tool" || warn "some $tool credentials were skipped; see the messages above"
   else
     printf 'Left %s credential(s) in plaintext. To migrate them later, run:\n  s3seal migrate %s\n' "$count" "$tool"
@@ -165,7 +167,7 @@ cmd_disable() {  # TOOL [FLAG]
   count="$(sealed_names "$tool" | count_lines)"
   if (( count > 0 )); then
     preflight "$tool"
-    if confirm_migrate "Restore $count $tool credential(s) to plaintext now" "$flag"; then
+    if confirm_migrate "Restore $count $tool credential(s) to plaintext now" "$flag" n; then
       to_plain "$tool"
     else
       printf 'Left %s credential(s) sealed. To restore them later, run:\n  s3seal migrate %s --to plain\n' "$count" "$tool"
@@ -271,8 +273,7 @@ cmd_upgrade() {  # [--check] [--force] [--dev]
     exit 0
   fi
 
-  # install.sh checks every file it installs against its own checksum table,
-  # so the upgrade is verified the same way as a fresh install.
+  # The installer for this release is fetched from the same tag as the files.
   curl -fsSL "https://raw.githubusercontent.com/$repo/$ref/install.sh" -o "$tmp/install.sh" \
     || die "cannot fetch the installer from $repo@$ref"
   S3SEAL_UPGRADE=1 S3SEAL_REPO="$repo" S3SEAL_REF="$ref" S3SEAL_SHARE_DIR="$S3SEAL_HOME" \

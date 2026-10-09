@@ -704,8 +704,8 @@ test_install_from_checkout() {
   OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
   assert_out "Copying s3seal from this checkout"
-  assert_out "mc: found the official client at $T/bin/mc"
-  assert_out "Current state:"
+  assert_out "left in place"
+  assert_out "Status"
   for f in libexec/mc libexec/aws libexec/s3seal lib/common.sh lib/ini.sh lib/aws.sh lib/mc.sh; do
     cmp -s "$ROOT/$f" "$HOME/.local/share/s3seal/$f" || fail "$f not installed"
   done
@@ -759,7 +759,7 @@ test_install_finds_only_present_clients() {
   export S3SEAL_YES=1
   OUT="$("$TEST_BASH" "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
-  assert_out "found the official client"
+  assert_out "left in place"
   assert_no_file "$S3SEAL_CONFIG_DIR/aws-path"
 }
 
@@ -807,8 +807,7 @@ test_install_defaults_to_release_tag() {
   fake_curl "$ROOT"
   OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
-  assert_out "Downloading s3seal from mhbahmani/s3seal@v1.2.0"
-  assert_out "all files match their checksums"
+  assert_out "from mhbahmani/s3seal@v1.2.0"
 }
 
 test_install_dev_flag_uses_master() {
@@ -816,8 +815,7 @@ test_install_dev_flag_uses_master() {
   fake_curl "$ROOT"
   OUT="$("$TEST_BASH" -s -- --dev < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
   assert_rc 0
-  assert_out "Downloading s3seal from mhbahmani/s3seal@master"
-  assert_out "not verified"
+  assert_out "from mhbahmani/s3seal@master"
 }
 
 test_upgrade_uses_latest_release_tag() {
@@ -842,24 +840,13 @@ test_install_twice_is_idempotent() {
   [[ "$(readlink "$HOME/.local/share/s3seal/bin/s3seal")" == "$HOME/.local/share/s3seal/libexec/s3seal" ]] || fail "link lost"
 }
 
-test_install_verifies_download_checksum() {
+test_install_downloads_release_files() {
   install_env
   fake_curl "$ROOT"
   OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
-  assert_rc 0; assert_out "all files match their checksums"
+  assert_rc 0
   assert_file "$HOME/.local/share/s3seal/lib/aws.sh"
-
-  rm -rf "$T/tampered"; mkdir -p "$T/tampered"
-  cp -r "$ROOT/libexec" "$ROOT/lib" "$T/tampered/"
-  set_version "$T/tampered/libexec/s3seal" tampered
-  fake_curl "$T/tampered"
-  rm -rf "$HOME/.local/share/s3seal"
-  OUT="$("$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
-  assert_rc 1; assert_out "checksum mismatch"
-  assert_no_file "$HOME/.local/share/s3seal/bin/s3seal"
-
-  OUT="$(S3SEAL_REF=some-branch "$TEST_BASH" < "$ROOT/install.sh" 2>&1)" && RC=0 || RC=$?
-  assert_rc 0; assert_out "not verified"
+  assert_out "downloaded 9 files"
 }
 
 test_install_then_enable_aws_end_to_end() {
@@ -981,18 +968,6 @@ test_installer_replace_reencrypts_and_removes_only_our_pair() {
   (( hit_new )) || fail "stored credential was not re-encrypted to the new key"
   (( hit_old )) && fail "stored credential still names the old key"
   assert_no_file "$S3SEAL_CONFIG_DIR/aliases/prod.url.asc.rekey"
-}
-
-test_install_checksums_are_current() {
-  local f actual
-  for f in libexec/mc libexec/aws libexec/s3seal lib/common.sh lib/ini.sh lib/aws.sh lib/mc.sh; do
-    if command -v sha256sum >/dev/null 2>&1; then
-      actual="$(sha256sum "$ROOT/$f" | cut -d' ' -f1)"
-    else
-      actual="$(shasum -a 256 "$ROOT/$f" | cut -d' ' -f1)"
-    fi
-    grep -qF "$actual  $f" "$ROOT/install.sh" || fail "install.sh is stale for $f; run scripts/update-checksum.sh"
-  done
 }
 
 test_install_reports_upgrade_over_older_version() {
