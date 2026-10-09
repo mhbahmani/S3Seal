@@ -258,9 +258,9 @@ test_api_and_path_flags_rejected() {
   assert_rc 1; assert_out "--api and --path are not supported"
 }
 
-test_unsupported_alias_subcommands() {
-  run_mc alias import prod cfg.json
-  assert_rc 1; assert_out "unsupported: 'mc alias import'"
+test_alias_import_missing_file_fails() {
+  run_mc alias import prod "$T/does-not-exist.json"
+  assert_rc 1; assert_out "Unable to parse credentials file."
 }
 
 test_aliases_after_double_dash_are_exported() {
@@ -322,6 +322,54 @@ test_list_and_endpoints() {
   run_mc alias ls
   assert_rc 0; assert_out "prod"; assert_out "https://minio.example.com"
   assert_not_out "SECRET123"; assert_not_out "AK1"
+}
+
+test_alias_export_prints_mc_json() {
+  store prod https://minio.example.com AK1 SECRET123
+  run_mc alias export prod
+  assert_rc 0
+  assert_out '"url": "https://minio.example.com"'
+  assert_out '"accessKey": "AK1"'
+  assert_out '"secretKey": "SECRET123"'
+}
+
+test_alias_import_round_trips_export() {
+  store src https://minio.example.com AK1 SECRET123
+  run_mc alias export src
+  printf '%s\n' "$OUT" > "$T/export.json"
+  run_mc alias import dst "$T/export.json"
+  assert_rc 0
+  assert_out "Imported alias dst"
+  [[ "$(stored dst)" == "https://AK1:SECRET123@minio.example.com" ]] || fail "stored: $(stored dst)"
+  # run_entry gives the command /dev/null as stdin, so pipe the file in directly.
+  OUT="$("$TEST_BASH" "$WRAPPER" alias import dst2 < "$T/export.json" 2>&1)" && RC=0 || RC=$?
+  assert_rc 0
+  [[ "$(stored dst2)" == "https://AK1:SECRET123@minio.example.com" ]] || fail "stdin import failed"
+}
+
+test_alias_import_rejects_bad_input() {
+  printf '{"url":"notaurl","accessKey":"AK","secretKey":"SK"}' > "$T/bad.json"
+  run_mc alias import bad "$T/bad.json"
+  assert_rc 1; assert_out "Invalid URL."
+  printf '{"url":"https://a.example.com","accessKey":"AK","secretKey":"SK","api":"S3v2"}' > "$T/legacy.json"
+  run_mc alias import legacy "$T/legacy.json"
+  assert_rc 1; assert_out "only S3v4 works"
+}
+
+test_alias_unknown_subcommand_passes_through() {
+  run_mc alias version
+  assert_log "ARGS: [alias] [version]"
+}
+
+test_list_aligns_host_column() {
+  store short https://a.example.com AK1 SECRET1
+  store a-much-longer-name https://very-long-host.example.internal.net:9000 AK2 SECRET2
+  run_mc alias list
+  assert_rc 0
+  local col1 col2
+  col1="$(grep -a 'short' <<<"$OUT" | awk '{print index($0, "https")}')"
+  col2="$(grep -a 'a-much-longer-name' <<<"$OUT" | awk '{print index($0, "https")}')"
+  [[ -n "$col1" && "$col1" == "$col2" ]] || fail "host column is misaligned: $col1 vs $col2"
 }
 
 test_list_warns_about_plaintext() {

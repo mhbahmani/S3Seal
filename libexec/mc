@@ -212,12 +212,8 @@ cmd_alias_remove() {
 }
 
 cmd_alias_list() {
-  local f n url rest host found=0 width=8 line listed='' count=0
-  for f in "$STORE"/*.url.asc; do
-    [[ -e "$f" ]] || continue
-    n="${f##*/}"; n="${n%.url.asc}"
-    (( ${#n} > width )) && width=${#n}
-  done
+  local f n url rest host found=0 nwidth=8 hwidth=8 line listed='' count=0 i
+  local -a names=() hosts=()
   for f in "$STORE"/*.url.asc; do
     [[ -e "$f" ]] || continue
     found=1
@@ -231,9 +227,15 @@ cmd_alias_list() {
       fi
     fi
     host="$(cat "$(mc_host_path "$n")" 2>/dev/null || true)"
-    ui_row 32 "$n" "$width" "$(printf '%-30s' "${host:-(unknown)}")" "sealed"
+    names+=("$n"); hosts+=("${host:-(unknown)}")
+    (( ${#n} > nwidth )) && nwidth=${#n}
+    (( ${#host} > hwidth )) && hwidth=${#host}
   done
   (( found )) || printf 'No aliases sealed in %s\n' "$STORE"
+
+  for i in "${!names[@]}"; do
+    ui_row 32 "${names[i]}" "$nwidth" "$(printf '%-*s' "$hwidth" "${hosts[i]}")" "sealed"
+  done
 
   line="$(mc_plaintext_aliases)"
   if [[ -n "$line" ]]; then
@@ -262,9 +264,66 @@ alias_main() {
       cmd_alias_remove "$1" ;;
     list|ls)
       cmd_alias_list ;;
+    export|e)
+      [[ $# -eq 1 ]] || die "usage: mc alias export ALIAS"
+      cmd_alias_export "$1" ;;
+    import|i)
+      [[ $# -ge 1 && $# -le 2 ]] || die "usage: mc alias import ALIAS [FILE]"
+      cmd_alias_import "$@" ;;
     *)
-      die "unsupported: 'mc alias ${sub}'. s3seal handles set, remove and list." ;;
+      # Anything else does not touch stored credentials: let mc handle it.
+      exec "$MC_REAL" ${MC_FLAGS[@]+"${MC_FLAGS[@]}"} alias "$sub" ${@+"$@"} ;;
   esac
+}
+
+# Prints the alias as mc does: the JSON of its configuration, secret key included.
+cmd_alias_export() {  # ALIAS
+  require_valid_alias "$1"
+  if [[ ! -r "$(store_path "$1")" ]]; then
+    exec "$MC_REAL" alias export "$1"
+  fi
+  local url rest ak sk host scheme
+  url="$(decrypt_alias "$1")"
+  scheme="${url%%://*}"
+  rest="${url#*://}"
+  host="${rest##*@}"
+  rest="${rest%@*}"
+  ak="${rest%%:*}"
+  sk="${rest#*:}"
+  printf '{\n  "url": "%s://%s",\n  "accessKey": "%s",\n  "secretKey": "%s",\n  "api": "S3v4",\n  "path": "auto"\n}\n' \
+    "$scheme" "$host" "$ak" "$sk"
+}
+
+# Reads a JSON alias (as mc export prints it) from FILE or stdin, and stores it
+# encrypted under ALIAS. An existing alias with that name is replaced, as in mc.
+cmd_alias_import() {  # ALIAS [FILE]
+  require_valid_alias "$1"
+  local json url ak sk api path scheme host
+  if [[ -n "${2:-}" ]]; then
+    json="$(cat -- "$2")" || die "Unable to parse credentials file."
+  else
+    json="$(cat)"
+  fi
+  json="$(printf '%s' "$json" | tr -d '\n' | sed 's/": */":/g')"
+  url="$(json_field "$json" url)"
+  ak="$(json_field "$json" accessKey)"
+  sk="$(json_field "$json" secretKey)"
+  api="$(json_field "$json" api)"
+  path="$(json_field "$json" path)"
+
+  [[ "$url" =~ ^https?://[^/@]+/?$ ]] || die "Invalid URL."
+  [[ -n "$ak" ]] || die "Invalid access key."
+  [[ -n "$sk" ]] || die "Invalid secret key."
+  [[ "$ak$sk" != *:* && "$ak$sk" != *[[:space:]]* ]] \
+    || die "keys cannot contain ':' or whitespace; mc cannot read them from MC_HOST_"
+  [[ -z "$api" || "$api" == [Ss]3[Vv]4 ]] || die "api '$api' cannot be stored; only S3v4 works with MC_HOST_"
+  [[ -z "$path" || "$path" == auto ]] || die "path '$path' cannot be stored; only auto works with MC_HOST_"
+
+  scheme="${url%%://*}"
+  host="${url#*://}"; host="${host%%/*}"
+  encrypt_to_store "$1" "$scheme://$ak:$sk@$host" "$(recipient)"
+  mc_write_host "$1" "$scheme://$host"
+  printf 'Imported alias %s -> %s://%s (encrypted)\n' "$1" "$scheme" "$host"
 }
 
 # ---------------------------------------------------------------------------
