@@ -154,7 +154,7 @@ cmd_enable() {  # TOOL [FLAG]
     manual_sealed "$tool"
   fi
   if [[ "$(command -v "$tool" 2>/dev/null || true)" != "$(bin_path "$tool")" ]]; then
-    warn "'$tool' does not resolve to the s3seal link yet: put $BIN_DIR before the other $tool on PATH"
+    printf 'note: %s must come first on your PATH for %s to use s3seal\n' "$BIN_DIR" "$tool" >&2
   fi
   printf '%s is sealed.\n' "$tool"
 }

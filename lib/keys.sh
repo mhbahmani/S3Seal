@@ -40,6 +40,9 @@ key_use() {  # FPR CREATED(yes|no)
   printf '%s\n' "$1" > "$CONFIG_DIR/recipient"
   if [[ "$2" == yes ]]; then
     printf '%s\n' "$1" > "$(key_mark_file)"
+    # The key is ours, so trust it. Without this gpg refuses to encrypt to it.
+    printf '%s:6:\n' "$1" | run_gpg --batch --import-ownertrust >/dev/null \
+      || warn "could not mark the s3seal key as trusted"
   fi
 }
 
