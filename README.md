@@ -7,7 +7,7 @@ You keep using `mc` and `aws` as usual. `s3seal` turns sealing on or off for
 each client and moves its credentials between plaintext and encrypted storage.
 
 <p align="center">
-  <img src="docs/S3Seal Secure CLI Workflow.png" alt="How s3seal keeps keys encrypted" width="800">
+  <img src="docs/S3Seal-Secure-CLI-Workflow.png" alt="How s3seal keeps keys encrypted" width="800">
 </p>
 
 ## Install
